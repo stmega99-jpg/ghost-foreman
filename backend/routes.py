@@ -79,6 +79,7 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             "news": news,
             "desktop_lease": lease_row,
             "usage": supervisor.llm.usage_summary(),
+            "notifications": supervisor.notifier.recent(20),
         }
 
     if method == "POST" and rel_path == "/questions":
@@ -192,7 +193,14 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
 
     if method == "POST" and rel_path == "/mode":
         mode_state = store.get_state("foreman_mode", {})
-        mode_state["mode"] = payload.get("mode", mode_state.get("mode", "away"))
+        new_mode = payload.get("mode", mode_state.get("mode", "away"))
+        if new_mode == "sleep" and mode_state.get("mode") != "sleep":
+            from datetime import datetime as _dt
+
+            mode_state["sleep_started_at"] = _dt.now().isoformat(timespec="seconds")
+        if new_mode != "sleep":
+            mode_state.pop("sleep_started_at", None)
+        mode_state["mode"] = new_mode
         if "quiet_until" in payload:
             mode_state["quiet_until"] = payload["quiet_until"]
         if "allow_unpublished_to_free_tier" in payload:

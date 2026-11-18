@@ -10,6 +10,7 @@ from .crew_adapter import CrewAdapter
 from .llm_router import LlmRouter, LlmUnavailable
 from .meeting import MeetingEngine, extract_json
 from .news import NewsCollector
+from .notifier import Notifier
 from .store import ForemanStore, _now_iso
 
 
@@ -22,6 +23,7 @@ class ForemanSupervisor:
         self.meetings = MeetingEngine(store, adapter)
         self.llm = LlmRouter(store, adapter)
         self.news = NewsCollector(store, self.llm)
+        self.notifier = Notifier(store, adapter)
 
     # ------------------------------------------------------------------
     # Spec C: Free-Tier & Budget Router
@@ -217,6 +219,18 @@ class ForemanSupervisor:
         project_id = slot["project_id"]
         now = _now_iso()
 
+        # An agent that re-asks the same question while it is still open must not create a second ticket
+        # (nor a second notification): hand back the open one.
+        with self.store._conn() as conn:
+            open_same = conn.execute(
+                "SELECT id FROM questions WHERE slot_id = ? AND raw_question = ? AND status IN ('probing','needs_human','needs_human_approval','held_spec_violation') ORDER BY created_at LIMIT 1",
+                (slot_id, raw_question),
+            ).fetchone()
+        if open_same:
+            d = self.get_question(open_same["id"])
+            d["deduplicated"] = True
+            return d
+
         # Record incoming question in slot history
         if not slot.get("is_live"):  # a live slot already holds the real question in its own transcript
             self.adapter.send_message(slot_id, f"[AIからの確認] {raw_question}", sender="agent_question", resume_work=False)
@@ -258,6 +272,7 @@ class ForemanSupervisor:
                     "UPDATE managed_slots SET status = 'waiting_human', waiting_reason = 'ツール実行承認待ち（ホスト権限）', updated_at = ? WHERE id = ?",
                     (now, slot_id),
                 )
+            self.notifier.decision_needed(qid)
             return self.get_question(qid)
 
         # 2. Check if the proposal violates or changes a locked specification (Spec A-7)
@@ -310,6 +325,7 @@ class ForemanSupervisor:
                     "UPDATE managed_slots SET status = 'held_spec_guard', waiting_reason = '確定仕様変更の保留（人間確認待ち）', updated_at = ? WHERE id = ?",
                     (now, slot_id),
                 )
+            self.notifier.decision_needed(qid)
             return self.get_question(qid)
 
         # 3. Auto-resolve if a matching Policy exists and no spec conflict (Spec A-2)
@@ -433,6 +449,7 @@ class ForemanSupervisor:
                 "UPDATE managed_slots SET status = 'waiting_human', waiting_reason = '幽霊が逆質問で論点整理済 → 人間の判断待ち（独立タスクへ一時切替中）', updated_at = ? WHERE id = ?",
                 (now, slot_id),
             )
+        self.notifier.decision_needed(qid)
         return self.get_question(qid)
 
     # ------------------------------------------------------------------
@@ -538,6 +555,7 @@ class ForemanSupervisor:
                 "UPDATE managed_slots SET waiting_reason = '幽霊が逆質問で論点整理済 → 人間の判断待ち', updated_at = ? WHERE id = ?",
                 (now, row["slot_id"]),
             )
+        self.notifier.decision_needed(qid)  # after the commit, so the push reads the final question
 
     def recover_probes(self) -> int:
         """After a restart no watcher exists for 'probing' questions: hand them to the human as-is."""

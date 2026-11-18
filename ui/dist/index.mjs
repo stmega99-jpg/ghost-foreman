@@ -1,83 +1,309 @@
-// Kiro Crew App Kit Frontend Entry (`ui/dist/index.mjs`)
-// Resolved at runtime by Kiro Crew Host import maps (`@kirocrew/app-sdk` & `@kirocrew/app-sdk/ui`)
-// Note: UIConfig.entry ("dist/index.mjs") resolves relative to `<app_root>/ui/`, i.e. `<app_root>/ui/dist/index.mjs`.
+// Ghost Foreman — Kiro Crew App UI (`ui/dist/index.mjs`, resolved relative to `<app_root>/ui/`).
+// This is the screen the Gateway actually serves (index.html is only used by the local dev server).
+// React renders text as text, so AI-written content is never interpreted as HTML.
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAppApi, useAppEvents } from "@kirocrew/app-sdk";
 
-import React, { useEffect, useState } from "react";
-import { useAppApi, useAppEvents, useAppInfo, useNotify, useChatLauncher } from "@kirocrew/app-sdk";
-import { Card, CardTitle, PageHeader, StatCard } from "@kirocrew/app-sdk/ui";
+const h = React.createElement;
+const BASE = "/api/apps/ghost-foreman";
 
-export default function GhostForemanApp() {
-  const api = useAppApi();
-  const appInfo = useAppInfo();
-  const notify = useNotify();
-  const launchChat = useChatLauncher();
-  const [dashboard, setDashboard] = useState(null);
+const C = { bg: "#0d0b18", card: "#17122a", border: "#2e1f47", text: "#f3e8ff", mute: "#a89bc4", accent: "#a78bfa", ok: "#34d399", warn: "#fbbf24", bad: "#f87171" };
+const S = {
+  page: { background: C.bg, color: C.text, minHeight: "100vh", padding: 16, fontFamily: "system-ui, sans-serif", fontSize: 14, lineHeight: 1.5 },
+  card: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, marginBottom: 12 },
+  row: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" },
+  btn: { background: "#3b2a66", color: C.text, border: `1px solid ${C.accent}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 14 },
+  btnOk: { background: "#064e3b", color: C.text, border: `1px solid ${C.ok}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 14 },
+  btnBad: { background: "#4c0519", color: C.text, border: `1px solid ${C.bad}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 14 },
+  input: { background: "#0d0b18", color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: 8, fontSize: 14, minWidth: 0, flex: 1 },
+  log: { background: "#0d0b18", border: `1px solid ${C.border}`, borderRadius: 8, padding: 8, margin: "6px 0", whiteSpace: "pre-wrap", fontSize: 13 },
+  mute: { color: C.mute, fontSize: 12 },
+};
 
-  const refresh = async () => {
-    const data = await api.get("/api/apps/ghost-foreman/dashboard");
-    setDashboard(data);
-  };
+const STATUS = {
+  needs_human: ["判断待ち", C.warn],
+  probing: ["担当AIへ逆質問中…", C.accent],
+  needs_human_approval: ["ツール承認待ち", C.warn],
+  held_spec_violation: ["仕様変更を保留", C.bad],
+  auto_resolved: ["自動回答済み", C.ok],
+  human_resolved: ["回答済み", C.ok],
+  batch_resolved: ["一括回答済み", C.ok],
+};
 
+function Badge({ text, color }) {
+  return h("span", { style: { border: `1px solid ${color || C.border}`, color: color || C.mute, borderRadius: 999, padding: "1px 8px", fontSize: 12, whiteSpace: "nowrap" } }, text);
+}
+const isPending = (q) => ["needs_human", "needs_human_approval", "held_spec_violation"].includes(q.status);
+
+// ------------------------------------------------------------------ inbox
+function QuestionCard({ q, call, highlight }) {
+  const [text, setText] = useState("");
+  const [follow, setFollow] = useState("");
+  const [batch, setBatch] = useState(false);
+  const ref = useRef(null);
   useEffect(() => {
-    refresh();
-  }, []);
-
-  useAppEvents("slots", () => refresh());
-  useAppEvents("onChatDone", () => refresh());
-
-  if (!dashboard) {
-    return React.createElement("div", { style: { padding: 24, color: "#e9d5ff" } }, "👻 Ghost Foreman 起動中...");
-  }
-
-  return React.createElement(
+    if (highlight && ref.current) ref.current.scrollIntoView({ block: "center" });
+  }, [highlight]);
+  const [label, color] = STATUS[q.status] || [q.status, C.mute];
+  const resolve = (answer, mode) =>
+    call("POST", "/questions/resolve", {
+      question_id: q.id,
+      answer_text: answer,
+      memory_mode: mode,
+      policy_scope: "project",
+      policy_title: "人間裁定: " + String(q.raw_question).slice(0, 30),
+      batch_apply_same_project: batch,
+    });
+  return h(
     "div",
-    { style: { background: "#0d0b18", color: "#f3e8ff", minHeight: "100vh", padding: 24 } },
-    React.createElement(PageHeader, {
-      title: "👻 Ghost Foreman — 幽霊現場監督",
-      subtitle: `Your agents work. You have a life. (${appInfo?.version || "0.2.0"} / ${dashboard.mode_state?.gateway_mode})`
-    }),
-    React.createElement(
-      "div",
-      { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 16 } },
-      React.createElement(StatCard, { label: "管理スロット (Managed/MCP)", value: String(dashboard.slots.length) }),
-      React.createElement(StatCard, {
-        label: "人間判断待ち",
-        value: String(dashboard.questions.filter((q) => q.status.startsWith("needs_human") || q.status.startsWith("held")).length)
-      }),
-      React.createElement(StatCard, {
-        label: "幽霊の自動解決数",
-        value: String(dashboard.questions.filter((q) => q.status === "auto_resolved").length)
-      }),
-      React.createElement(StatCard, { label: "選択的記憶 (Policies)", value: String(dashboard.policies.length) })
+    { ref, style: { ...S.card, ...(highlight ? { borderColor: C.accent, boxShadow: `0 0 0 2px ${C.accent}55` } : {}) } },
+    h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: `${q.project_id} / ${q.slot_id}` }), h(Badge, { text: label, color })),
+    h("h3", { style: { margin: "8px 0" } }, "AIからの確認: " + q.raw_question),
+    q.context_summary ? h("p", { style: { whiteSpace: "pre-wrap" } }, q.context_summary) : null,
+    q.recommendation ? h("p", { style: { color: C.accent } }, "👻 幽霊の推奨: " + q.recommendation + " — " + (q.recommendation_reason || "")) : null,
+    ...(q.probe_history || []).map((p, i) => h("div", { key: "p" + i, style: S.log }, h("strong", null, `[${p.role}] `), p.text)),
+    ...(q.options || []).map((o) =>
+      h(
+        "div",
+        { key: o.id, style: { ...S.log, borderColor: C.accent } },
+        h("strong", null, o.label),
+        o.difference ? h("div", null, "違い: " + o.difference) : null,
+        o.impact ? h("div", null, "影響: " + o.impact) : null,
+        isPending(q)
+          ? h(
+              "div",
+              { style: { ...S.row, marginTop: 6 } },
+              h("button", { style: S.btn, onClick: () => resolve(o.label + " を採用", "one_time") }, "今回のみこの案"),
+              h("button", { style: S.btnOk, onClick: () => resolve(o.label + " を標準規約として採用", "permanent_policy") }, "🧠 恒久ルールにして回答")
+            )
+          : null
+      )
     ),
-    React.createElement(
-      Card,
-      { style: { marginTop: 16 } },
-      React.createElement(CardTitle, null, "Managed Slots & Direct Chat Hand-off"),
-      dashboard.slots.slice(0, 6).map((slot) =>
-        React.createElement(
+    q.final_answer ? h("div", { style: { ...S.log, borderColor: C.ok } }, h("strong", null, "[送信済み回答] "), q.final_answer) : null,
+    isPending(q)
+      ? h(
           "div",
-          {
-            key: slot.id,
-            style: { display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #2e1f47" }
-          },
-          React.createElement("span", null, `[${slot.id}] ${slot.name} — ${slot.current_task}`),
-          React.createElement(
-            "button",
-            {
-              onClick: () => {
-                launchChat({ slotId: slot.id, agent: slot.backend });
-                notify({ title: "Slot Opened", message: `${slot.name} へ直接接続しました` });
-              }
-            },
-            "直接話す"
+          { style: { marginTop: 10, borderTop: `1px solid ${C.border}`, paddingTop: 10 } },
+          h("div", { style: S.mute }, "自由に回答する（選択肢以外でもOK）"),
+          h("textarea", { style: { ...S.input, width: "100%", minHeight: 60, boxSizing: "border-box" }, value: text, onChange: (e) => setText(e.target.value), placeholder: "回答を入力…" }),
+          h(
+            "div",
+            { style: { ...S.row, marginTop: 6 } },
+            h("button", { style: S.btn, disabled: !text.trim(), onClick: () => resolve(text.trim(), "one_time") }, "今回のみ回答"),
+            h("button", { style: S.btnOk, disabled: !text.trim(), onClick: () => resolve(text.trim(), "permanent_policy") }, "🧠 恒久ルールにして回答"),
+            h("label", { style: S.mute }, h("input", { type: "checkbox", checked: batch, onChange: (e) => setBatch(e.target.checked) }), " 同一案件の同種確認にも一括適用")
+          ),
+          h("div", { style: { ...S.row, marginTop: 8 } },
+            h("input", { style: S.input, value: follow, onChange: (e) => setFollow(e.target.value), placeholder: "質問で返す（例: JSONとSQLiteの違いは？）" }),
+            h("button", { style: S.btn, disabled: !follow.trim(), onClick: () => call("POST", "/questions/inquire", { question_id: q.id, human_inquiry: follow.trim(), re_probe_agent: true }).then(() => setFollow("")) }, "💬 質問で返す")
           )
         )
+      : null
+  );
+}
+
+function Inbox({ d, call, focusQ }) {
+  const sorted = [...d.questions].sort((a, b) => Number(isPending(b)) - Number(isPending(a)) || String(b.created_at).localeCompare(String(a.created_at)));
+  if (!sorted.length) return h("div", { style: S.card }, "受信した確認はまだありません。管理スロットのAIが foreman_ask で質問すると、ここに表示されます。");
+  return h("div", null, ...sorted.map((q) => h(QuestionCard, { key: q.id, q, call, highlight: focusQ === q.id })));
+}
+
+// ------------------------------------------------------------------ slots
+function Slots({ d, call }) {
+  return h(
+    "div",
+    null,
+    h("div", { style: { ...S.card, ...S.mute } }, "「実接続」は Kiro Crew Gateway 上の本物のセッションです。「模擬」はデモ用のサンプルで、実在のAIではありません。"),
+    ...d.slots.map((s) =>
+      h(
+        "div",
+        { key: s.id, style: S.card },
+        h("div", { style: { ...S.row, justifyContent: "space-between" } },
+          h("strong", null, `${s.id} ${s.name}`),
+          h("span", { style: S.row }, h(Badge, { text: s.is_live ? "実接続" : "模擬", color: s.is_live ? C.ok : C.warn }), h(Badge, { text: s.status }))
+        ),
+        h("div", null, `案件 ${s.project_id} / 役割 ${s.role} / ${s.backend}`),
+        h("div", null, "現在の仕事: " + s.current_task),
+        s.waiting_reason ? h("div", { style: { color: C.warn } }, "待機理由: " + s.waiting_reason) : null,
+        s.next_task ? h("div", { style: S.mute }, "次の予約: " + s.next_task) : null,
+        h("div", { style: { ...S.row, marginTop: 8 } }, h("button", { style: S.btnBad, onClick: () => call("POST", "/stop", { scope: "slot", target_id: s.id }) }, "⏹ 停止"))
       )
     )
   );
 }
 
-export function mount(container) {
+// ------------------------------------------------------------------ meetings
+function Meetings({ d, call }) {
+  const [topic, setTopic] = useState("");
+  const [project, setProject] = useState(d.projects[0] ? d.projects[0].id : "proj-foreman");
+  const workers = d.slots.filter((s) => s.is_live && !["会議参加者", "議事整理", "判定係"].includes(s.role));
+  const [target, setTarget] = useState({});
+  return h(
+    "div",
+    null,
+    h("div", { style: S.card },
+      h("h3", { style: { marginTop: 0 } }, "💬 AI会議を開く（実エージェントが独立案出し→相互批評→整理）"),
+      h("div", { style: S.row },
+        h("select", { style: { ...S.input, flex: "0 0 auto" }, value: project, onChange: (e) => setProject(e.target.value) }, ...d.projects.map((p) => h("option", { key: p.id, value: p.id }, p.name))),
+        h("input", { style: S.input, value: topic, onChange: (e) => setTopic(e.target.value), placeholder: "議題（例: セーブ時の安心感を与える演出）" }),
+        h("button", { style: S.btnOk, disabled: !topic.trim(), onClick: () => call("POST", "/meetings", { project_id: project, topic: topic.trim() }).then(() => setTopic("")) }, "開催")
+      ),
+      h("div", { style: S.mute }, "相談段階では何も実装しません。あなたが案を採用したときだけ、担当スロットへ発注します。")
+    ),
+    ...d.meetings.map((m) => {
+      const live = m.summary && m.summary.live !== false;
+      const chosen = target[m.id] || (workers.find((w) => w.project_id === m.project_id) || workers[0] || {}).id || "";
+      return h(
+        "div",
+        { key: m.id, style: S.card },
+        h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: m.project_id }), h("span", { style: S.row }, h(Badge, { text: live ? "実AI" : "模擬", color: live ? C.ok : C.warn }), h(Badge, { text: m.status === "running" ? "進行中…" : m.status, color: m.status === "running" ? C.accent : C.mute }))),
+        h("h3", { style: { margin: "8px 0" } }, "議題: " + m.topic),
+        h("div", { style: S.mute }, "参加: " + m.participants.join(" / ")),
+        ...m.rounds.map((r, i) => h("div", { key: i, style: S.log }, h("strong", null, r.phase), ...r.entries.map((e, j) => h("div", { key: j, style: { marginTop: 6 } }, h("strong", null, e.speaker + ": "), e.proposal || e.critique)))),
+        m.summary && m.summary.consensus
+          ? h("div", { style: { ...S.log, borderColor: C.accent } },
+              h("strong", null, "👻 幽霊の論点整理"), h("div", null, m.summary.consensus),
+              m.summary.conflict_points ? h("div", { style: { color: C.warn, marginTop: 4 } }, "対立点: " + m.summary.conflict_points) : null,
+              m.summary.unresolved ? h("div", { style: { marginTop: 4 } }, "未決事項: " + m.summary.unresolved) : null)
+          : null,
+        m.summary && m.summary.note ? h("div", { style: S.mute }, m.summary.note) : null,
+        m.status === "awaiting_human_adoption"
+          ? h("div", { style: { marginTop: 8 } },
+              h("div", { style: S.row },
+                h("span", { style: S.mute }, "発注先:"),
+                h("select", { style: { ...S.input, flex: "0 0 auto" }, value: chosen, onChange: (e) => setTarget({ ...target, [m.id]: e.target.value }) },
+                  ...(workers.length ? workers : [{ id: "", name: "（実スロットなし）" }]).map((w) => h("option", { key: w.id || "none", value: w.id }, w.id ? `${w.id} ${w.name}` : w.name)))),
+              ...(m.summary.options_for_human || []).map((o) =>
+                h("div", { key: o.id, style: { ...S.log, borderColor: C.accent } },
+                  h("strong", null, o.label), o.detail ? h("div", null, o.detail) : null,
+                  h("button", { style: o.id === "hold_as_idea" ? S.btn : S.btnOk, disabled: o.id !== "hold_as_idea" && !chosen, onClick: () => call("POST", "/meetings/adopt", { meeting_id: m.id, option_id: o.id, target_slot_id: chosen }) }, o.id === "hold_as_idea" ? "保存のみ" : "この案を採用して発注"))))
+          : null
+      );
+    })
+  );
+}
+
+// ------------------------------------------------------------------ policies / news / audit
+function Policies({ d }) {
+  if (!d.policies.length) return h("div", { style: S.card }, "確定ルールはまだありません。");
+  return h("div", null, ...d.policies.map((p) => h("div", { key: p.id, style: S.card },
+    h("div", { style: { ...S.row, justifyContent: "space-between" } }, h("strong", null, p.title), h(Badge, { text: `${p.scope} / ${p.project_id} / v${p.version}` })),
+    h("div", { style: { marginTop: 6, whiteSpace: "pre-wrap" } }, p.rule_text),
+    h("div", { style: S.mute }, `${p.id} / 由来 ${p.source}${p.locked ? " / 確定仕様（無断変更不可）" : ""} / キーワード ${(p.keywords || []).join(", ")}`))));
+}
+
+function News({ d, call }) {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const add = async () => {
+    setBusy(true); setErr("");
+    try { await call("POST", "/news/summarize", { project_id: (d.projects[0] || {}).id || "proj-foreman", url: url.trim(), reason: "手動で指定されたURL" }); setUrl(""); }
+    catch (e) { setErr(String((e && e.message) || e)); }
+    setBusy(false);
+  };
+  return h("div", null,
+    h("div", { style: S.card },
+      h("div", { style: S.row }, h("input", { style: S.input, value: url, onChange: (e) => setUrl(e.target.value), placeholder: "https://… 公開ページのURL" }), h("button", { style: S.btnOk, disabled: busy || !url.trim(), onClick: add }, busy ? "要約中…" : "要約して保存")),
+      err ? h("div", { style: { color: C.bad, marginTop: 6 } }, err) : null,
+      h("div", { style: S.mute }, "公開ページだけを取得します（内部アドレスは拒否）。事実と推定を分けて保存します。")),
+    ...d.news.map((n) => h("div", { key: n.id, style: S.card },
+      h("strong", null, n.title), h("div", { style: S.mute }, `${n.category} / 掲載日 ${n.published_date} / 収集理由: ${n.relevance_reason}`),
+      h("div", { style: { ...S.log, borderColor: C.ok } }, h("strong", null, "事実\n"), n.facts_summary),
+      h("div", { style: { ...S.log, borderColor: C.warn } }, h("strong", null, "推定\n"), n.estimates_summary),
+      h("div", { style: S.mute }, "元記事: " + n.url))));
+}
+
+function Audit({ d }) {
+  if (!d.audits.length) return h("div", { style: S.card }, "監査ログはまだありません。");
+  return h("div", null, ...d.audits.map((a) => h("div", { key: a.id, style: S.card },
+    h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: `${a.project_id} / ${a.slot_id}` }), h(Badge, { text: `${a.actor}: ${a.action_type}` })),
+    h("div", { style: { marginTop: 6 } }, "原文: " + a.raw_question),
+    a.referenced_policy_id ? h("div", { style: S.mute }, "適用ルール: " + a.referenced_policy_id) : null,
+    h("div", { style: S.log }, a.answer_sent), h("div", { style: S.mute }, (a.rationale || "") + " / " + a.created_at))));
+}
+
+// ------------------------------------------------------------------ settings
+function Settings({ d, call }) {
+  const allow = !!(d.mode_state && d.mode_state.allow_unpublished_to_free_tier);
+  const u = d.usage || { totals: [] };
+  const cooling = u.gemini_cooldown_until && u.gemini_cooldown_until * 1000 > Date.now();
+  const toggle = () => {
+    const want = !allow;
+    if (want && !window.confirm("制作内容（AIからの質問・確定ルールの本文）を Gemini の無料枠へ送信します。\n無料枠に送った内容は、Google によって製品改善などに利用される可能性があります。\n\n許可しますか？")) return;
+    call("POST", "/mode", { allow_unpublished_to_free_tier: want });
+  };
+  return h("div", null,
+    h("div", { style: S.card },
+      h("h3", { style: { marginTop: 0 } }, "🔒 制作内容の Gemini 無料枠への送信"),
+      h("div", null, "AIからの質問や確定ルールの本文を、判定のために Gemini の無料枠へ送ってよいかを決めます。"),
+      h("label", { style: { ...S.row, margin: "8px 0" } }, h("input", { type: "checkbox", checked: allow, onChange: toggle }), h("strong", null, allow ? "許可している（制作内容を無料枠へ送信する）" : "許可していない（制作内容は送信しない）")),
+      h("div", { style: S.mute }, "許可しない場合、制作内容の判定は Kiro Crew の実セッションで行います。公開ニュースの整理はこの設定に関係なく Gemini を使います。")),
+    h("div", { style: S.card },
+      h("h3", { style: { marginTop: 0 } }, "💰 費用と使用量"),
+      h("div", null, "実際の請求額: ", h(Badge, { text: u.actual_billing || "未確認", color: C.warn })),
+      h("div", { style: S.mute }, u.billing_note || ""),
+      h("div", { style: { margin: "6px 0" } }, cooling ? "Gemini無料枠は上限により待機中（Kiroの実セッションに切替。有料APIには切り替えません）" : "Gemini無料枠: 利用可能（または未使用）"),
+      h("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 13 } },
+        h("thead", null, h("tr", { style: { textAlign: "left" } }, ...["提供元", "呼び出し", "成功", "トークン(入/出)", "請求額"].map((t) => h("th", { key: t }, t)))),
+        h("tbody", null, ...(u.totals || []).map((t) => h("tr", { key: t.provider_id }, h("td", null, t.provider_id), h("td", null, t.calls), h("td", null, t.ok_calls), h("td", null, `${t.input_tokens} / ${t.output_tokens}`), h("td", null, t.cost_display || "未確認"))))),
+      h("div", { style: S.mute }, "トークン数は提供元の実測値です。Kiro の使用量はホストが公開していないため、0ではなく未確認として扱います。有料APIへの切替機能は実装していません。")),
+    h("div", { style: S.card },
+      h("h3", { style: { marginTop: 0 } }, "🔔 通知の履歴"),
+      h("div", { style: S.mute }, "sent=送信 / held=おやすみ中に保留 / held_resident=常駐モードのため通知せず / failed=失敗 / not_sent=模擬モード"),
+      ...(d.notifications || []).map((n) => h("div", { key: n.id, style: S.log }, h("strong", null, `[${n.delivery}] `), `${n.title} ${n.body}`, h("div", { style: S.mute }, `${n.ts} ${n.detail || ""}`)))));
+}
+
+// ------------------------------------------------------------------ app
+const TABS = [["inbox", "📥 判断待ち"], ["slots", "🤖 スロット"], ["meetings", "💬 AI会議"], ["policies", "🧠 記憶・ルール"], ["news", "📰 ニュース"], ["settings", "⚙️ 設定・費用"], ["audit", "📜 監査ログ"]];
+
+export default function GhostForemanApp() {
+  const api = useAppApi();
+  const [d, setD] = useState(null);
+  const [error, setError] = useState("");
+  const focusQ = useMemo(() => new URLSearchParams(window.location.search).get("q") || "", []);
+  const [tab, setTab] = useState(focusQ ? "inbox" : "inbox");
+
+  const refresh = useCallback(async () => {
+    try { setD(await api.get(BASE + "/dashboard")); setError(""); }
+    catch (e) { setError(String((e && e.message) || e)); }
+  }, [api]);
+  const call = useCallback(async (method, path, body) => {
+    try {
+      const res = method === "GET" ? await api.get(BASE + path) : await api.post(BASE + path, body || {});
+      await refresh();
+      return res;
+    } catch (e) {
+      setError(String((e && e.message) || e));
+      throw e;
+    }
+  }, [api, refresh]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  useAppEvents("slots", () => refresh());
+  useAppEvents("onChatDone", () => refresh());
+  const busy = d && (d.meetings.some((m) => m.status === "running") || d.questions.some((q) => q.status === "probing"));
+  useEffect(() => { const t = setInterval(refresh, busy ? 5000 : 20000); return () => clearInterval(t); }, [refresh, busy]);
+
+  if (!d) return h("div", { style: S.page }, error ? "接続エラー: " + error : "👻 Ghost Foreman 起動中…");
+  const live = d.mode_state && d.mode_state.gateway_mode === "live_gateway";
+  const pending = d.questions.filter(isPending).length;
+  const body = { inbox: Inbox, slots: Slots, meetings: Meetings, policies: Policies, news: News, settings: Settings, audit: Audit }[tab];
+  return h("div", { style: S.page },
+    h("div", { style: { ...S.row, justifyContent: "space-between", marginBottom: 10 } },
+      h("div", null, h("strong", { style: { fontSize: 18 } }, "👻 Ghost Foreman"), h("div", { style: S.mute }, "Your agents work. You have a life.")),
+      h("div", { style: S.row },
+        h(Badge, { text: live ? "Gateway実接続" : "模擬モード", color: live ? C.ok : C.warn }),
+        h("select", { style: { ...S.input, flex: "0 0 auto" }, value: (d.mode_state && d.mode_state.mode) || "away", onChange: (e) => call("POST", "/mode", { mode: e.target.value }) },
+          h("option", { value: "resident" }, "🏠 常駐（通知しない）"), h("option", { value: "away" }, "🚃 離席（判断待ちを通知）"), h("option", { value: "sleep" }, "🌙 おやすみ（朝にまとめて通知）")),
+        h("button", { style: S.btnBad, onClick: () => { if (window.confirm("すべての実スロットを停止します。よろしいですか？")) call("POST", "/stop", { scope: "all" }); } }, "🛑 全停止"),
+        h("button", { style: S.btnOk, onClick: () => call("POST", "/stop", { scope: "resume_all" }) }, "▶ 全再開"))),
+    error ? h("div", { style: { ...S.card, borderColor: C.bad, color: C.bad } }, error) : null,
+    h("div", { style: { ...S.row, marginBottom: 10 } }, ...TABS.map(([k, t]) => h("button", { key: k, style: { ...S.btn, ...(tab === k ? { background: C.accent, color: "#0d0b18" } : {}) }, onClick: () => setTab(k) }, t + (k === "inbox" && pending ? ` (${pending})` : "")))),
+    h(body, { d, call, focusQ })
+  );
+}
+
+export function mount() {
   return GhostForemanApp;
 }

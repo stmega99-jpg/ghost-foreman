@@ -1,0 +1,93 @@
+// Renders the real ui/dist/index.mjs with real dashboard data in jsdom and drives it like a user.
+import { JSDOM } from "jsdom";
+import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const dash = JSON.parse(fs.readFileSync(path.join(process.argv[2]), "utf8"));
+const dom = new JSDOM("<!doctype html><div id=root></div>", { url: "http://localhost:5476/apps/ghost-foreman?q=" + (dash.questions.find((q) => q.status === "needs_human") || {}).id, pretendToBeVisual: true });
+globalThis.window = dom.window;
+globalThis.document = dom.window.document;
+Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
+globalThis.HTMLElement = dom.window.HTMLElement;
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+dom.window.HTMLElement.prototype.scrollIntoView = function () { globalThis.__scrolled = this.textContent.slice(0, 40); };
+
+const calls = [];
+globalThis.__api = {
+  get: async (p) => { calls.push(["GET", p]); return JSON.parse(JSON.stringify(dash)); },
+  post: async (p, b) => { calls.push(["POST", p, b]); return { ok: true }; },
+};
+globalThis.__confirms = [];
+dom.window.confirm = (m) => { globalThis.__confirms.push(m); return true; };
+
+const React = (await import("react")).default;
+const { createRoot } = await import("react-dom/client");
+const { act } = await import("react");
+const mod = await import(pathToFileURL(path.resolve(process.argv[3])).href);
+const App = mod.default;
+
+const root = createRoot(document.getElementById("root"));
+await act(async () => { root.render(React.createElement(App)); });
+await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+
+const text = () => document.body.textContent;
+const expect = (name, cond) => { console.log((cond ? "PASS" : "FAIL") + "  " + name); if (!cond) process.exitCode = 1; };
+const clickText = async (label, nth = 0) => {
+  const el = [...document.querySelectorAll("button")].filter((b) => b.textContent.includes(label))[nth];
+  if (!el) { console.log("  (no button: " + label + ")"); return false; }
+  await act(async () => { el.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+  return true;
+};
+
+expect("header shows Gateway実接続", text().includes("Gateway実接続"));
+expect("inbox shows a pending question", text().includes("AIからの確認") && text().includes("判断待ち"));
+expect("deep link ?q= scrolled to the question", !!globalThis.__scrolled);
+expect("answer buttons exist (今回のみ / 恒久ルール)", text().includes("今回のみ") && text().includes("恒久ルールにして回答"));
+
+// free-text answer as permanent rule
+const ta = document.querySelector("textarea");
+if (ta) {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value").set;
+    setter.call(ta, "テスト回答です");
+    ta.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  const btn = [...ta.parentElement.querySelectorAll("button")].find((b) => b.textContent.includes("恒久ルールにして回答"));
+  await act(async () => { btn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+}
+const resolveCall = calls.find((c) => c[0] === "POST" && c[1].endsWith("/questions/resolve"));
+expect("free text -> POST /questions/resolve with permanent_policy", !!resolveCall && resolveCall[2].memory_mode === "permanent_policy" && resolveCall[2].answer_text === "テスト回答です");
+
+// escaping: AI text containing HTML must be shown as text
+const evil = JSON.parse(JSON.stringify(dash));
+evil.questions[0].raw_question = "<img src=x onerror=alert(1)><b>bold</b>";
+globalThis.__api.get = async () => JSON.parse(JSON.stringify(evil));
+await act(async () => { root.render(React.createElement(App, { key: "again" })); });
+await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+expect("HTML in AI output is not interpreted", !document.querySelector("img[src='x']") && text().includes("<img src=x onerror=alert(1)>"));
+
+// tabs
+for (const [label, needle] of [["スロット", "実接続"], ["AI会議", "開催"], ["記憶・ルール", "確定"], ["ニュース", "要約して保存"], ["設定・費用", "未確認"], ["監査ログ", "監査"]]) {
+  await clickText(label);
+  expect("tab " + label + " renders (" + needle + ")", text().includes(needle));
+}
+
+// settings: enabling the privacy switch asks first
+await clickText("設定・費用");
+const cb = document.querySelector("input[type=checkbox]");
+calls.length = 0;
+await act(async () => { cb.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+expect("enabling the privacy switch shows a confirm dialog", globalThis.__confirms.length === 1 && globalThis.__confirms[0].includes("Gemini"));
+const modeCall = calls.find((c) => c[1] && c[1].endsWith("/mode"));
+expect("...and then POST /mode allow_unpublished_to_free_tier=true", !!modeCall && modeCall[2].allow_unpublished_to_free_tier === true);
+
+// stop buttons
+await clickText("スロット");
+calls.length = 0;
+await clickText("⏹ 停止", 0);
+expect("slot stop -> POST /stop scope=slot", calls.some((c) => c[1] && c[1].endsWith("/stop") && c[2].scope === "slot"));
+calls.length = 0;
+await clickText("全停止");
+expect("全停止 confirms then POST /stop scope=all", calls.some((c) => c[1] && c[1].endsWith("/stop") && c[2].scope === "all"));
+process.exit(process.exitCode || 0);

@@ -44,6 +44,12 @@
       "args": ["backend/mcp_server.py"]
     }
   },
+  "notifications": {
+    "channels": [
+      {"id": "decision-needed", "name": "判断待ち（人間の確認が必要）", "icon": "ghost", "defaultPriority": "default"},
+      {"id": "digest", "name": "朝のまとめ報告", "icon": "sun", "defaultPriority": "passive"}
+    ]
+  },
   "permissions": {
     "api": [
       "/api/slots",

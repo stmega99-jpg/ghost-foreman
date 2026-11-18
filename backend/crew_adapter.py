@@ -252,4 +252,21 @@ class CrewAdapter:
                     "UPDATE managed_slots SET status = 'working', waiting_reason = '', updated_at = ? WHERE status = 'stopped'",
                     (now,),
                 )
-        return {"ok": True, "scope": scope, "target_id": target_id, "updated_at": now}
+        result: Dict[str, Any] = {"ok": True, "scope": scope, "target_id": target_id, "updated_at": now, "live_stopped": [], "live_errors": []}
+        if scope != "resume_all" and self.live is not None:
+            # Also stop the REAL sessions (the DB status alone would not interrupt a running agent).
+            with self.store._conn() as conn:
+                if scope == "slot" and target_id:
+                    rows = conn.execute("SELECT id, live_key FROM managed_slots WHERE id = ? AND live_key != ''", (target_id,)).fetchall()
+                elif scope == "project" and target_id:
+                    rows = conn.execute("SELECT id, live_key FROM managed_slots WHERE project_id = ? AND live_key != ''", (target_id,)).fetchall()
+                else:
+                    rows = conn.execute("SELECT id, live_key FROM managed_slots WHERE live_key != ''").fetchall()
+            for r in rows:
+                try:
+                    self.live.stop_slot(r["live_key"])
+                    result["live_stopped"].append(r["id"])
+                except Exception as exc:  # noqa: BLE001
+                    result["live_errors"].append(f"{r['id']}: {exc}")
+            result["ok"] = not result["live_errors"]
+        return result

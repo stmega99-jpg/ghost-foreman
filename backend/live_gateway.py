@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -41,6 +42,7 @@ FOREMAN_TOOLS = [
     "@ghost-foreman:ghost-foreman-mcp/foreman_report_status",
 ]
 APPROVAL_POLL_SECS = 2.0
+TOKEN_CACHE_SECS = 240.0  # app tokens expire after 300s
 
 
 class LiveGatewayError(RuntimeError):
@@ -153,25 +155,32 @@ class LiveGateway:
 
     # -- foreman tool approvals --------------------------------------------
     def _http(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+        """Call the Gateway as this app. App tokens live 300s, so refresh early and retry once on 401/403."""
         port = os.environ.get("KIROCREW_PORT", "5476")
         base = os.environ.get("KIROCREW_GATEWAY_URL", f"http://127.0.0.1:{port}").rstrip("/")
-        now = time.time()
-        if not self._token or now - self._token_ts > 600:
-            secret = (Path.home() / ".kiro" / "crew" / "apps" / APP_NAME / ".app_secret").read_text(encoding="utf-8").strip()
-            req = urllib.request.Request(
-                f"{base}/api/apps/{APP_NAME}/token", data=b"{}", method="POST",
-                headers={"Content-Type": "application/json", "X-App-Secret": secret},
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                self._token = json.loads(resp.read().decode("utf-8"))["token"]
-            self._token_ts = now
-        sep = "&" if "?" in path else "?"
-        url = f"{base}{path}{sep}{urllib.parse.urlencode({'token': self._token})}"
-        data = json.dumps(body).encode("utf-8") if body is not None else None
-        req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8") or "null")
-
+        for attempt in (0, 1):
+            now = time.time()
+            if attempt == 1 or not self._token or now - self._token_ts > TOKEN_CACHE_SECS:
+                secret = (Path.home() / ".kiro" / "crew" / "apps" / APP_NAME / ".app_secret").read_text(encoding="utf-8").strip()
+                req = urllib.request.Request(
+                    f"{base}/api/apps/{APP_NAME}/token", data=b"{}", method="POST",
+                    headers={"Content-Type": "application/json", "X-App-Secret": secret},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    self._token = json.loads(resp.read().decode("utf-8"))["token"]
+                self._token_ts = now
+            sep = "&" if "?" in path else "?"
+            url = f"{base}{path}{sep}{urllib.parse.urlencode({'token': self._token})}"
+            data = json.dumps(body).encode("utf-8") if body is not None else None
+            req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return json.loads(resp.read().decode("utf-8") or "null")
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403) and attempt == 0:
+                    continue
+                raise
+        raise RuntimeError("unreachable")
     def _approve_foreman_tools_once(self) -> int:
         done = 0
         for key in list(self.leases):
@@ -244,6 +253,10 @@ class LiveGateway:
         lease = self.leases.pop(key, None)
         if lease is not None and not lease.released:
             await lease.release()
+
+    def stop_slot(self, key: str) -> None:
+        """Interrupt whatever the real session is doing (Gateway's own stop route). Worker-thread safe."""
+        self._http("POST", f"/api/chat/slots/{urllib.parse.quote(key)}/stop", {})
 
     async def delete(self, key: str) -> None:
         """Release the lease and remove the slot from the Gateway (best effort)."""
