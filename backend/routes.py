@@ -138,6 +138,18 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
         )
         return 200, slot
 
+    if method == "POST" and rel_path == "/slots/send":
+        res = adapter.send_message(
+            slot_id=payload["slot_id"],
+            message=payload["message"],
+            sender=payload.get("sender", "human_via_foreman"),
+            resume_work=bool(payload.get("resume_work", True)),
+        )
+        return 200, res
+
+    if method == "GET" and rel_path.startswith("/slots/history"):
+        slot_id = payload.get("slot_id") or (rel_path.split("?slot_id=", 1)[1] if "?slot_id=" in rel_path else "")
+        return 200, adapter.get_slot_history(slot_id, limit=int(payload.get("limit", 50)))
     if method == "POST" and rel_path == "/stop":
         res = adapter.stop_control(
             scope=payload.get("scope", "all"),
@@ -171,6 +183,8 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
             from aiohttp import web
 
             body = None
+            if request.method == "GET":
+                body = dict(request.query)
             if request.method in ("POST", "PUT", "PATCH"):
                 try:
                     body = await request.json()
@@ -191,6 +205,8 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
         ("POST", "/meetings"),
         ("POST", "/meetings/adopt"),
         ("POST", "/slots"),
+        ("POST", "/slots/send"),
+        ("GET", "/slots/history"),
         ("POST", "/stop"),
         ("POST", "/mode"),
         ("POST", "/desktop-lease"),

@@ -8,7 +8,6 @@ Conforms to Kiro Crew 0.12.2 `LifecycleDispatcher` ABI:
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,7 @@ _STORE: ForemanStore | None = None
 _ADAPTER: CrewAdapter | None = None
 _SUPERVISOR: ForemanSupervisor | None = None
 _CTX: Any = None
+_LIVE: Any = None
 
 
 def get_runtime(data_dir: Path | None = None) -> tuple[ForemanStore, CrewAdapter, ForemanSupervisor]:
@@ -44,17 +44,23 @@ async def on_startup(ctx: Any = None) -> None:
     global _CTX
     _CTX = ctx
     data_dir = Path(ctx.data_dir) if ctx is not None and hasattr(ctx, "data_dir") else None
+    loop = asyncio.get_running_loop()
 
     def _init() -> None:
+        global _LIVE
         store, adapter, _ = get_runtime(data_dir=data_dir)
-        # Raise worker slot limit in Kiro Crew if running in-gateway
         try:
-            from kiro_crew.apps.worker_slots import set_worker_slot_limit
+            from .live_gateway import LiveGateway
 
-            set_worker_slot_limit("ghost-foreman", 20)
-            adapter.gateway_mode = "live_gateway"
-        except Exception:
-            pass
+            _LIVE = LiveGateway(ctx, loop)
+            adapter.bind_live(_LIVE)
+        except Exception as exc:  # outside a Gateway or state unavailable: stay simulated, and say so
+            _LIVE = None
+            log = getattr(ctx, "logger", None)
+            if log is not None:
+                log.warning("ghost-foreman: live Gateway bridge unavailable (%s); running simulated", exc)
+        if _LIVE is not None:
+            adapter.reattach_live_slots()
         mode_state = store.get_state("foreman_mode", {})
         mode_state["gateway_mode"] = adapter.gateway_mode
         store.set_state("foreman_mode", mode_state)
@@ -64,4 +70,7 @@ async def on_startup(ctx: Any = None) -> None:
 
 async def on_shutdown(ctx: Any = None) -> None:
     """Invoked asynchronously by Kiro Crew Gateway when Ghost Foreman is disabled or stopped."""
-    return None
+    global _LIVE
+    if _LIVE is not None:
+        await _LIVE.release_all()
+        _LIVE = None
