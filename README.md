@@ -85,3 +85,16 @@ python dev_server.py
 
 ## 5. License
 MIT License — see [LICENSE](./LICENSE).
+
+
+## Gemini (free tier) and spending safety
+
+Ghost Foreman can use the official Gemini API for low-cost work (news summaries, and question triage if you allow it).
+
+- Register your key in Kiro Crew: **Settings → Secrets → `GEMINI_API_KEY`**. The key is read from the vault at call time, sent only in the `x-goog-api-key` header, and never written to logs, URLs or the repository.
+- Use a key from **Google AI Studio's free tier (a project without billing)**. Ghost Foreman cannot detect whether a key's project has billing enabled, and Google charges such projects.
+- Order of providers: Gemini free tier → a real Kiro Crew session → hold. When the free tier is exhausted (HTTP 429) Gemini is paused for the retry delay and the next provider is used. **There is no code path to a metered paid API.**
+- Privacy switch: unpublished project text (questions, rules) is **not** sent to the Gemini free tier unless you turn on `allow_unpublished_to_free_tier` (`POST /api/apps/ghost-foreman/mode`). Free-tier inputs may be used by the provider. Public pages (news) are always allowed.
+- `GET /api/apps/ghost-foreman/usage` shows calls and measured tokens per provider. Kiro session usage is not exposed by the host and is shown as unknown.
+
+Tests for the failure paths (quota exhaustion, overloaded model, rejected key, SSRF guard) use an injected transport: `python -m unittest discover -s tests -v`.

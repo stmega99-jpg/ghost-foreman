@@ -241,7 +241,8 @@
       <button class="tab-btn" onclick="switchTab('policies', this)">🧠 選択的記憶・制作ルール</button>
       <button class="tab-btn" onclick="switchTab('news', this)">📰 興味ニュース（事実/推定分離）</button>
       <button class="tab-btn" onclick="switchTab('resources', this)">⚡ 無料API枠・経費＆PC操作権</button>
-      <button class="tab-btn" onclick="switchTab('audit', this)">📜 監査ログ・履歴</button>
+      <button class="tab-btn" onclick="switchTab('settings', this)">⚙️ 設定（送信許可・費用）</button>
+    <button class="tab-btn" onclick="switchTab('audit', this)">📜 監査ログ・履歴</button>
     </div>
 
     <div id="tabContent"></div>
@@ -324,6 +325,15 @@
       await refresh();
     }
 
+    async function setPrivacy(checkbox) {
+      const want = checkbox.checked;
+      if (want && !confirm("制作内容（AIからの質問・確定ルールの本文）を Gemini の無料枠へ送信します。\n無料枠に送った内容は、Google によって製品改善などに利用される可能性があります。\n\n許可しますか？")) {
+        checkbox.checked = false;
+        return;
+      }
+      await api("POST", "/api/apps/ghost-foreman/mode", { allow_unpublished_to_free_tier: want });
+      await refresh();
+    }
     function esc(v) {
       return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     }
@@ -596,11 +606,42 @@
                 <h3>${b.display_name}</h3>
                 <span class="badge ${b.paid_allowed ? 'badge-warn' : 'badge-ok'}">${b.tier_type} / 計測区分: ${b.cost_tracking_mode}</span>
               </div>
-              <p>利用量: ${b.free_quota_used} / ${b.free_quota_limit} | 追加API課金許可: ${b.paid_allowed ? '許可' : '🔒 不許可（無断課金ブロック中）'} | 状態: ${b.status}</p>
+              <p>利用量: ${b.free_quota_used} / ${b.free_quota_limit} | 追加API課金許可: ${b.paid_allowed ? '許可' : '🔒 不許可（無断課金ブロック中）'} | 状態: ${esc(b.status)} | 請求額: 未確認</p>
               <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
             </div>
           `;
         }).join("");
+      } else if (currentTab === "settings") {
+        const allow = !!(state.mode_state && state.mode_state.allow_unpublished_to_free_tier);
+        const u = state.usage || { totals: [], recent: [] };
+        const rows = (u.totals || []).map(t => `
+          <tr><td>${esc(t.provider_id)}</td><td>${esc(t.calls)}</td><td>${esc(t.ok_calls)}</td>
+              <td>${esc(t.input_tokens)} / ${esc(t.output_tokens)}</td><td>${esc(t.cost_display || "未確認")}</td></tr>`).join("");
+        const cool = u.gemini_cooldown_until && u.gemini_cooldown_until * 1000 > Date.now()
+          ? `Gemini無料枠は上限により ${new Date(u.gemini_cooldown_until * 1000).toLocaleTimeString()} まで待機中（Kiroの実セッションに切替。有料APIには切り替えません）`
+          : "Gemini無料枠: 利用可能（または未使用）";
+        content.innerHTML = `
+          <div class="card">
+            <h3>🔒 制作内容の Gemini 無料枠への送信</h3>
+            <p>AIからの質問や確定ルールの本文を、判定のために Gemini の無料枠へ送ってよいかを決めます。</p>
+            <label style="display:flex; gap:8px; align-items:center; margin:8px 0;">
+              <input type="checkbox" ${allow ? "checked" : ""} onchange="setPrivacy(this)" />
+              <strong>${allow ? "許可している（制作内容を無料枠へ送信する）" : "許可していない（制作内容は送信しない）"}</strong>
+            </label>
+            <p style="font-size:12px; color:var(--text-muted);">許可しない場合、制作内容の判定は Kiro Crew の実セッション（契約枠内）で行います。公開ニュースの整理は、この設定に関係なく Gemini を使います。無料枠に送った内容は提供元に利用される可能性があります。</p>
+          </div>
+          <div class="card">
+            <h3>💰 費用と使用量</h3>
+            <p><strong>実際の請求額:</strong> <span class="badge badge-warn">${esc(u.actual_billing || "未確認")}</span></p>
+            <p style="font-size:12px;">${esc(u.billing_note || "")}</p>
+            <p>${esc(cool)}</p>
+            <table style="width:100%; font-size:13px; border-collapse:collapse;">
+              <tr style="text-align:left;"><th>提供元</th><th>呼び出し</th><th>成功</th><th>トークン(入力/出力)</th><th>請求額</th></tr>
+              ${rows || "<tr><td colspan='5'>まだ呼び出しはありません</td></tr>"}
+            </table>
+            <p style="font-size:12px; color:var(--text-muted);">トークン数は提供元の実測値です。Kiro の使用量はホストが公開していないため「0」ではなく未確認として扱います。有料APIへの切替機能は実装していません。</p>
+          </div>
+        `;
       } else if (currentTab === "audit") {
         content.innerHTML = state.audits.map(a => `
           <div class="card">
