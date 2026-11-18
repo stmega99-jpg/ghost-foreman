@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Any, Dict
 
-from backend.hooks import get_runtime
+from .hooks import get_runtime
 
 
 def handle_mcp_call(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

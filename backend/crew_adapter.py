@@ -19,7 +19,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from backend.store import ForemanStore, _now_iso
+from .store import ForemanStore, _now_iso
 
 
 class CrewAdapter:

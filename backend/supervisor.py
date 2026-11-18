@@ -6,8 +6,8 @@ import json
 import uuid
 from typing import Any, Dict, List, Optional
 
-from backend.crew_adapter import CrewAdapter
-from backend.store import ForemanStore, _now_iso
+from .crew_adapter import CrewAdapter
+from .store import ForemanStore, _now_iso
 
 
 class ForemanSupervisor:

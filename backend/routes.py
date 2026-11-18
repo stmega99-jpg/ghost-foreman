@@ -25,7 +25,7 @@ class ForemanRoute:
 
 def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = None) -> Tuple[int, Dict[str, Any]]:
     """Framework-agnostic API dispatcher used by both Kiro Crew Gateway routes and the local dev server."""
-    from backend.hooks import get_runtime
+    from .hooks import get_runtime
 
     store, adapter, supervisor = get_runtime()
     payload = body or {}

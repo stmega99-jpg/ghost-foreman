@@ -12,9 +12,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from backend.crew_adapter import CrewAdapter
-from backend.store import ForemanStore
-from backend.supervisor import ForemanSupervisor
+from .crew_adapter import CrewAdapter
+from .store import ForemanStore
+from .supervisor import ForemanSupervisor
 
 _STORE: ForemanStore | None = None
 _ADAPTER: CrewAdapter | None = None
