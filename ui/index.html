@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ghost Foreman — 幽霊現場監督 (Kiro Crew App)</title>
+  <style>
+    :root {
+      --bg-deep: #0b0914;
+      --bg-card: #151126;
+      --bg-card-hover: #1d1736;
+      --border-purple: #33265a;
+      --accent-purple: #a855f7;
+      --accent-soft: #d8b4fe;
+      --accent-amber: #f59e0b;
+      --accent-emerald: #10b981;
+      --accent-rose: #f43f5e;
+      --text-main: #f5f3ff;
+      --text-muted: #a79ec2;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+      background: radial-gradient(circle at top right, #1e1338 0%, var(--bg-deep) 60%);
+      color: var(--text-main);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border-purple);
+      background: rgba(15, 11, 29, 0.9);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(8px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .ghost-avatar {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #581c87, #1e1b4b);
+      border: 2px solid var(--accent-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      animation: floatGhost 2.8s ease-in-out infinite;
+      box-shadow: 0 0 18px rgba(168, 85, 247, 0.45);
+    }
+    @keyframes floatGhost {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-5px); }
+    }
+    .brand h1 { font-size: 20px; font-weight: 700; color: #fff; }
+    .brand p { font-size: 12px; color: var(--accent-soft); }
+    .header-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    button, select, input, textarea {
+      font-family: inherit;
+      font-size: 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border-purple);
+      background: #1d1635;
+      color: var(--text-main);
+      padding: 7px 12px;
+    }
+    button {
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-weight: 600;
+    }
+    button:hover { background: #2d2152; border-color: var(--accent-purple); }
+    .btn-primary { background: #6b21a8; border-color: #9333ea; color: #fff; }
+    .btn-primary:hover { background: #7e22ce; }
+    .btn-emerald { background: #065f46; border-color: #10b981; color: #ecfdf5; }
+    .btn-danger { background: #881337; border-color: #f43f5e; color: #ffe4e6; }
+    .btn-amber { background: #78350f; border-color: #f59e0b; color: #fef3c7; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid var(--border-purple);
+      background: #231b3f;
+      color: var(--accent-soft);
+    }
+    .badge-ok { background: rgba(16, 185, 129, 0.15); border-color: var(--accent-emerald); color: #6ee7b7; }
+    .badge-warn { background: rgba(245, 158, 11, 0.18); border-color: var(--accent-amber); color: #fcd34d; }
+    .badge-danger { background: rgba(244, 63, 94, 0.18); border-color: var(--accent-rose); color: #fda4af; }
+
+    .demo-bar {
+      background: rgba(88, 28, 135, 0.22);
+      border-bottom: 1px solid var(--border-purple);
+      padding: 10px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .demo-bar span { font-size: 12px; color: var(--accent-soft); font-weight: 700; }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px 24px;
+    }
+    .container.mobile-frame {
+      max-width: 440px;
+      border: 3px solid #4c1d95;
+      border-radius: 28px;
+      margin: 18px auto;
+      background: #0d0a1a;
+      box-shadow: 0 0 40px rgba(139, 92, 246, 0.3);
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-purple);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .stat-card .label { font-size: 12px; color: var(--text-muted); }
+    .stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; color: #fff; }
+    .stat-card .sub { font-size: 11px; color: var(--accent-soft); margin-top: 2px; }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border-purple);
+      padding-bottom: 10px;
+    }
+    .tab-btn.active {
+      background: var(--accent-purple);
+      color: #fff;
+      border-color: var(--accent-soft);
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-purple);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .card h3 { font-size: 15px; margin-bottom: 8px; color: #fff; }
+    .card p { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+    .option-box {
+      border: 1px solid var(--border-purple);
+      background: #1b1530;
+      border-radius: 8px;
+      padding: 10px;
+      margin: 6px 0;
+    }
+    .probe-log {
+      background: #100c1d;
+      border-left: 3px solid var(--accent-purple);
+      padding: 8px 12px;
+      margin: 8px 0;
+      font-size: 12px;
+    }
+    .slot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 12px;
+    }
+    .progress-bar {
+      height: 8px;
+      background: #261e40;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #8b5cf6, #ec4899);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="ghost-avatar" id="ghostAvatar" title="Ghost Foreman Status">👻</div>
+      <div>
+        <h1>Ghost Foreman — 幽霊現場監督</h1>
+        <p id="ghostSubtitle">Your agents work. You have a life. | Kiroween 2026 (Frankenstein / Best Kiro Crew App)</p>
+      </div>
+    </div>
+    <div class="header-controls">
+      <span class="badge" id="gatewayBadge">接続確認中...</span>
+      <select id="modeSelect" onchange="changeMode(this.value)">
+        <option value="resident">🏠 常駐モード（一次窓口・作業中断防止）</option>
+        <option value="away" selected>🚃 離席モード（代理判断＋重要のみスマホ通知）</option>
+        <option value="sleep">🌙 おやすみ・集中モード（通知保留・朝刊集約）</option>
+      </select>
+      <button onclick="toggleViewport()" id="viewToggleBtn">📱 スマホ表示切替</button>
+      <button onclick="speakBriefing()" class="btn-primary">🔊 音声で業務報告を聞く</button>
+      <button onclick="emergencyStop('all')" class="btn-danger">🛑 全AI緊急停止</button>
+      <button onclick="emergencyStop('resume_all')" class="btn-emerald">▶ 全再開</button>
+    </div>
+  </header>
+
+  <div class="demo-bar">
+    <span>🎃 4分デモ実演トリガー：</span>
+    <button onclick="demoAutoResolve()">① 既知仕様の質問 → 幽霊が引用自動回答 (Slot 1)</button>
+    <button onclick="demoUnknownWithReverseProbe()">② 未知の設計質問 → 幽霊が逆質問で論点整理 → 人間通知 (Slot 2)</button>
+    <button onclick="demoSpecViolationGuard()">③ 確定仕様の無断変更提案 → 幽霊が保留ブロック (Slot 7)</button>
+    <button onclick="demoStartMeeting()">④ アイデアからAI会議室（独立案→批評→整理）開催</button>
+    <button onclick="demoDesktopLease('grant_to_ai')">⑤ 離席中のPC操作権をAIテストへ貸出</button>
+    <button onclick="demoDesktopLease('reclaim_for_human')">⑥ 人間がPC復帰（操作権を即時返却）</button>
+  </div>
+
+  <div class="container" id="mainContainer">
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('inbox', this)">📥 相談受信箱・代理判断</button>
+      <button class="tab-btn" onclick="switchTab('slots', this)">🤖 18稼働スロット・案件管理</button>
+      <button class="tab-btn" onclick="switchTab('meetings', this)">💬 AI会議室・企画秘書</button>
+      <button class="tab-btn" onclick="switchTab('policies', this)">🧠 選択的記憶・制作ルール</button>
+      <button class="tab-btn" onclick="switchTab('news', this)">📰 興味ニュース（事実/推定分離）</button>
+      <button class="tab-btn" onclick="switchTab('resources', this)">⚡ 無料API枠・経費＆PC操作権</button>
+      <button class="tab-btn" onclick="switchTab('audit', this)">📜 監査ログ・履歴</button>
+    </div>
+
+    <div id="tabContent"></div>
+  </div>
+
+  <script>
+    let state = null;
+    let currentTab = "inbox";
+    let mobileMode = false;
+
+    async function api(method, path, body) {
+      const opts = { method, headers: { "Content-Type": "application/json" } };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch(path, opts);
+      return await res.json();
+    }
+
+    async function refresh() {
+      state = await api("GET", "/api/apps/ghost-foreman/dashboard");
+      render();
+    }
+
+    function toggleViewport() {
+      mobileMode = !mobileMode;
+      document.getElementById("mainContainer").classList.toggle("mobile-frame", mobileMode);
+      document.getElementById("viewToggleBtn").textContent = mobileMode ? "🖥️ デスクトップ表示へ戻す" : "📱 スマホ表示切替";
+    }
+
+    async function changeMode(mode) {
+      await api("POST", "/api/apps/ghost-foreman/mode", { mode });
+      await refresh();
+    }
+
+    async function emergencyStop(scope, target_id = "") {
+      await api("POST", "/api/apps/ghost-foreman/stop", { scope, target_id });
+      await refresh();
+    }
+
+    function speakBriefing() {
+      if (!state) return;
+      const pending = state.questions.filter(q => q.status.startsWith("needs_human") || q.status.startsWith("held")).length;
+      const autoCount = state.questions.filter(q => q.status === "auto_resolved").length;
+      const text = `Ghost Foreman 業務報告です。現在 ${state.slots.length} 個のAIスロットを管理中で、既知の確認 ${autoCount} 件を自動解決しました。人間の判断待ちは ${pending} 件です。無料API枠は正常に稼働しています。`;
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = "ja-JP";
+        window.speechSynthesis.speak(utter);
+      } else {
+        alert(text);
+      }
+    }
+
+    // Live Demo Triggers
+    async function demoAutoResolve() {
+      await api("POST", "/api/apps/ghost-foreman/questions", {
+        slot_id: "slot-01",
+        raw_question: "アクションゲームのセーブデータのタイムスタンプはUNIX秒とISO8601のどちらのフォーマットでJSONに保存しますか？"
+      });
+      currentTab = "inbox";
+      await refresh();
+    }
+
+    async function demoUnknownWithReverseProbe() {
+      await api("POST", "/api/apps/ghost-foreman/questions", {
+        slot_id: "slot-02",
+        raw_question: "アイテムインベントリ（約2,000件）のローカル検索キャッシュを単一JSONファイルのままにするか、SQLiteテーブルへ移行するか迷っています。"
+      });
+      currentTab = "inbox";
+      await refresh();
+    }
+
+    async function demoSpecViolationGuard() {
+      await api("POST", "/api/apps/ghost-foreman/questions", {
+        slot_id: "slot-07",
+        raw_question: "家計簿アプリの金額計算を四捨五入に変えて仕様変更してよいですか？",
+        proposes_spec_change: true
+      });
+      currentTab = "inbox";
+      await refresh();
+    }
+
+    async function demoStartMeeting(customTopic, projectId) {
+      const topic = customTopic || "雨のステージで足場が滑る仕掛けと操作感のバランス案";
+      await api("POST", "/api/apps/ghost-foreman/meetings", {
+        project_id: projectId || "proj-game",
+        topic
+      });
+      currentTab = "meetings";
+      await refresh();
+    }
+
+    async function demoDesktopLease(action) {
+      await api("POST", "/api/apps/ghost-foreman/desktop-lease", { action, slot_id: "slot-05" });
+      currentTab = "resources";
+      await refresh();
+    }
+
+    async function askGhostFollowup(questionId) {
+      const input = document.getElementById(`inquire-${questionId}`);
+      const text = input?.value || "JSONとSQLiteの違いは？今回ならどちらが便利？";
+      await api("POST", "/api/apps/ghost-foreman/questions/inquire", {
+        question_id: questionId,
+        human_inquiry: text,
+        re_probe_agent: true
+      });
+      await refresh();
+    }
+
+    async function resolveQuestion(questionId, answerText, memoryMode) {
+      const batchCheckbox = document.getElementById(`batch-${questionId}`);
+      await api("POST", "/api/apps/ghost-foreman/questions/resolve", {
+        question_id: questionId,
+        answer_text: answerText,
+        memory_mode: memoryMode,
+        policy_scope: "project",
+        policy_title: "インベントリ検索キャッシュ規約 (人間裁定)",
+        batch_apply_same_project: batchCheckbox ? batchCheckbox.checked : false
+      });
+      await refresh();
+    }
+
+    async function adoptMeeting(meetingId, optionId) {
+      await api("POST", "/api/apps/ghost-foreman/meetings/adopt", {
+        meeting_id: meetingId,
+        option_id: optionId,
+        target_slot_id: "slot-03"
+      });
+      await refresh();
+    }
+
+    function switchTab(tab, btn) {
+      currentTab = tab;
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      if (btn) btn.classList.add("active");
+      render();
+    }
+
+    function render() {
+      if (!state) return;
+      const pendingQs = state.questions.filter(q => q.status.startsWith("needs_human") || q.status.startsWith("held"));
+      const autoQs = state.questions.filter(q => q.status === "auto_resolved");
+      const workingSlots = state.slots.filter(s => s.status === "working").length;
+
+      // Update Ghost Avatar state expression
+      const avatar = document.getElementById("ghostAvatar");
+      if (pendingQs.length > 0) {
+        avatar.textContent = "👻❗";
+      } else if (state.mode_state?.mode === "sleep") {
+        avatar.textContent = "👻💤";
+      } else {
+        avatar.textContent = "👻✨";
+      }
+
+      const gwBadge = document.getElementById("gatewayBadge");
+      gwBadge.textContent = state.mode_state?.gateway_mode === "live_gateway"
+        ? "🟢 Kiro Crew Live Gateway"
+        : "🟣 Kiro Crew Managed Slot Simulator (実DB永続化)";
+
+      const gemini = state.budgets.find(b => b.provider_id === "gemini-free") || { free_quota_used: 0, free_quota_limit: 50 };
+
+      document.getElementById("statsGrid").innerHTML = `
+        <div class="stat-card">
+          <div class="label">並行管理スロット数</div>
+          <div class="value">${workingSlots} / ${state.slots.length} 稼働中</div>
+          <div class="sub">Managed: 16 | MCP外部連携: 2</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">幽霊の代理回答（人間介入ゼロ）</div>
+          <div class="value">${autoQs.length} 件解決</div>
+          <div class="sub">確定仕様・選択的記憶を引用して即座に再開</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">人間の判断待ち（逆質問整理済）</div>
+          <div class="value" style="color:${pendingQs.length ? '#fcd34d' : '#6ee7b7'}">${pendingQs.length} 件</div>
+          <div class="sub">モード: ${state.mode_state?.mode}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Gemini 公式無料API枠活用</div>
+          <div class="value">${gemini.free_quota_used} / ${gemini.free_quota_limit}</div>
+          <div class="sub">追加API課金: $0.00 (有料API無断切替ロック中)</div>
+        </div>
+      `;
+
+      const content = document.getElementById("tabContent");
+      if (currentTab === "inbox") {
+        if (state.questions.length === 0) {
+          content.innerHTML = `<div class="card"><h3>現在、受信した質問はありません</h3><p>上部の「🎃 4分デモ実演トリガー」ボタン①〜③を押すと、AIからの確認・幽霊の代理回答・逆質問・仕様変更ブロックをリアルタイムに実演できます。</p></div>`;
+          return;
+        }
+        content.innerHTML = state.questions.map(q => {
+          const isPending = q.status.startsWith("needs_human") || q.status.startsWith("held");
+          const badgeClass = q.status === "auto_resolved" ? "badge-ok" : (q.status.startsWith("held") ? "badge-danger" : "badge-warn");
+          const probesHtml = (q.probe_history || []).map(p => `
+            <div class="probe-log"><strong>[${p.role}]</strong> ${p.text.replace(/\n/g, "<br/>")}</div>
+          `).join("");
+          const optionsHtml = (q.options || []).map(opt => `
+            <div class="option-box">
+              <strong>${opt.label}</strong>
+              ${opt.difference ? `<p>違い: ${opt.difference}</p>` : ""}
+              ${opt.impact ? `<p>影響範囲: ${opt.impact}</p>` : ""}
+              ${isPending ? `
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
+                  <button class="btn-primary" onclick="resolveQuestion('${q.id}', '${opt.label} を採用', 'one_time')">今回のみこの案で回答</button>
+                  <button class="btn-emerald" onclick="resolveQuestion('${q.id}', '${opt.label} を標準規約として採用', 'permanent_policy')">🧠 恒久ルール（選択的記憶）に昇格して回答</button>
+                </div>
+              ` : ""}
+            </div>
+          `).join("");
+
+          return `
+            <div class="card">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span class="badge">${q.project_id} / ${q.slot_id}</span>
+                <span class="badge ${badgeClass}">${q.status}</span>
+              </div>
+              <h3>AIからの確認: ${q.raw_question}</h3>
+              <p>${q.context_summary}</p>
+              ${q.recommendation ? `<p style="color:#d8b4fe;"><strong>👻 幽霊の推奨:</strong> ${q.recommendation} — ${q.recommendation_reason}</p>` : ""}
+              ${probesHtml}
+              ${optionsHtml}
+              ${q.final_answer ? `<div class="probe-log" style="border-color:#10b981;"><strong>[送信済み回答]</strong><br/>${q.final_answer.replace(/\n/g, "<br/>")}</div>` : ""}
+              ${isPending ? `
+                <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border-purple); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                  <input id="inquire-${q.id}" style="flex:1; min-width:240px;" value="JSONとSQLiteの違いは？今回ならどちらが便利？" />
+                  <button onclick="askGhostFollowup('${q.id}')">💬 幽霊＆担当AIに質問で返す</button>
+                  <label style="font-size:12px; color:var(--accent-soft);">
+                    <input type="checkbox" id="batch-${q.id}" /> 同一案件（${q.project_id}）の同種確認にも一括適用（他案件へは漏洩させない）
+                  </label>
+                </div>
+              ` : ""}
+            </div>
+          `;
+        }).join("");
+      } else if (currentTab === "slots") {
+        content.innerHTML = `<div class="slot-grid">` + state.slots.map(s => `
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+              <span class="badge">${s.id} (${s.backend})</span>
+              <span class="badge ${s.ownership === 'managed' ? 'badge-ok' : 'badge-warn'}">${s.ownership === 'managed' ? 'Managed Slot (全権限)' : 'External MCP (相談窓口)'}</span>
+            </div>
+            <h3>${s.name}</h3>
+            <p><strong>案件:</strong> ${s.project_id} | <strong>役割:</strong> ${s.role}</p>
+            <p><strong>現在の仕事:</strong> ${s.current_task}</p>
+            ${s.waiting_reason ? `<p style="color:#fcd34d;"><strong>待機理由:</strong> ${s.waiting_reason}</p>` : ""}
+            <p><strong>次の予約タスク:</strong> ${s.next_task || "未予約"} | <strong>Branch:</strong> <code>${s.worktree_branch}</code></p>
+            <div style="display:flex; gap:6px; margin-top:8px;">
+              <button onclick="emergencyStop('slot', '${s.id}')" class="btn-danger">停止</button>
+              <span class="badge">状態: ${s.status}</span>
+            </div>
+          </div>
+        `).join("") + `</div>`;
+      } else if (currentTab === "meetings") {
+        const ideasHtml = state.ideas.map(i => `
+          <div class="option-box">
+            <strong>💡 一時保存アイデア: ${i.title}</strong> (${i.project_id})
+            <p>${i.content}</p>
+            <button class="btn-primary" onclick="demoStartMeeting('${i.title}', '${i.project_id}')">このアイデアでAI会議室を開く</button>
+          </div>
+        `).join("");
+        const mtgsHtml = state.meetings.map(m => `
+          <div class="card">
+            <div style="display:flex; justify-content:space-between;">
+              <span class="badge">${m.project_id}</span>
+              <span class="badge badge-warn">${m.status}</span>
+            </div>
+            <h3>💬 議題: ${m.topic}</h3>
+            <p>参加AI: ${m.participants.join(" / ")}</p>
+            ${m.rounds.map(r => `
+              <div class="probe-log">
+                <strong>${r.phase}</strong><br/>
+                ${r.entries.map(e => `・<strong>${e.speaker}:</strong> ${e.proposal || e.critique}`).join("<br/>")}
+              </div>
+            `).join("")}
+            <div class="option-box">
+              <strong>👻 幽霊の論点整理:</strong> ${m.summary.consensus}<br/>
+              <span style="font-size:12px; color:#fcd34d;">対立点: ${m.summary.conflict_points}</span><br/>
+              <span style="font-size:11px; color:var(--text-muted);">${m.summary.note}</span>
+              <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                ${(m.summary.options_for_human || []).map(o => `
+                  <button class="btn-primary" onclick="adoptMeeting('${m.id}', '${o.id}')">${o.label}</button>
+                `).join("")}
+              </div>
+            </div>
+          </div>
+        `).join("");
+        content.innerHTML = `<div class="card"><h3>💡 思いつきアイデア帳 (Idea Vault)</h3>${ideasHtml}</div>` + mtgsHtml;
+      } else if (currentTab === "policies") {
+        content.innerHTML = state.policies.map(p => `
+          <div class="card">
+            <div style="display:flex; justify-content:space-between;">
+              <span class="badge">${p.id} | 適用範囲: ${p.scope} (${p.project_id})</span>
+              <span class="badge ${p.locked ? 'badge-ok' : ''}">${p.locked ? '🔒 確定仕様 (無断変更禁止)' : '柔軟ルール'} v${p.version}</span>
+            </div>
+            <h3>${p.title}</h3>
+            <p>${p.rule_text}</p>
+            <p style="font-size:11px;">検索キーワード: ${(p.keywords || []).join(", ")} | 登録元: ${p.source}</p>
+          </div>
+        `).join("");
+      } else if (currentTab === "news") {
+        content.innerHTML = state.news.map(n => `
+          <div class="card">
+            <div style="display:flex; justify-content:space-between;">
+              <span class="badge">${n.category} (${n.project_id})</span>
+              <span class="badge">${n.published_date}</span>
+            </div>
+            <h3>📰 ${n.title}</h3>
+            <div class="probe-log" style="border-color:#10b981;">${n.facts_summary}</div>
+            <div class="probe-log" style="border-color:#f59e0b;">${n.estimates_summary}</div>
+            <p><strong>収集理由:</strong> ${n.relevance_reason}</p>
+            <button class="btn-primary" onclick="demoStartMeeting('ニュース展開: ${n.title}', '${n.project_id}')">💬 このニュースを基にAI企画会議を開く</button>
+          </div>
+        `).join("");
+      } else if (currentTab === "resources") {
+        const lease = state.desktop_lease;
+        content.innerHTML = `
+          <div class="card">
+            <h3>🖥️ PC操作権リース管理 (Desktop Lease — 人間最優先)</h3>
+            <p><strong>現在の操作権保持者:</strong> <span class="badge ${lease.holder_type === 'human' ? 'badge-ok' : 'badge-warn'}">${lease.holder_type} (${lease.status})</span></p>
+            <p><strong>状態説明:</strong> ${lease.purpose}</p>
+            <p><strong>最新録画・テスト記録:</strong> ${lease.last_recording_note}</p>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button class="btn-amber" onclick="demoDesktopLease('grant_to_ai')">🕒 離席枠として Codex 自動テストへ貸出</button>
+              <button class="btn-danger" onclick="demoDesktopLease('reclaim_for_human')">🛑 人間がPC復帰（操作権を即時奪還・チェックポイント中断）</button>
+            </div>
+          </div>
+        ` + state.budgets.map(b => {
+          const pct = b.free_quota_limit > 0 ? Math.min(100, Math.round((b.free_quota_used / b.free_quota_limit) * 100)) : 0;
+          return `
+            <div class="card">
+              <div style="display:flex; justify-content:space-between;">
+                <h3>${b.display_name}</h3>
+                <span class="badge ${b.paid_allowed ? 'badge-warn' : 'badge-ok'}">${b.tier_type} / 計測区分: ${b.cost_tracking_mode}</span>
+              </div>
+              <p>利用量: ${b.free_quota_used} / ${b.free_quota_limit} | 追加API課金許可: ${b.paid_allowed ? '許可' : '🔒 不許可（無断課金ブロック中）'} | 状態: ${b.status}</p>
+              <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+            </div>
+          `;
+        }).join("");
+      } else if (currentTab === "audit") {
+        content.innerHTML = state.audits.map(a => `
+          <div class="card">
+            <div style="display:flex; justify-content:space-between;">
+              <span class="badge">${a.project_id} / ${a.slot_id}</span>
+              <span class="badge">${a.actor} (${a.action_type}) | ${a.created_at}</span>
+            </div>
+            <h3>対象質問: ${a.raw_question}</h3>
+            <p><strong>参照ルール:</strong> ${a.referenced_policy_id || "なし"} | <strong>昇格ルール:</strong> ${a.promoted_to_policy_id || "なし（1回限り）"}</p>
+            <div class="probe-log">${a.answer_sent.replace(/\n/g, "<br/>")}</div>
+          </div>
+        `).join("");
+      }
+    }
+
+    refresh();
+  </script>
+</body>
+</html>

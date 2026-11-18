@@ -1,0 +1,17 @@
+# Python / Runtime caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+data/*.db
+data/*.db-journal
+data/logs/
+
+# Node
+node_modules/
+
+# IMPORTANT for Kiroween 2026:
+# Do NOT ignore .kiro/ — official rules require .kiro/ at the repository root.
+!.kiro/
+!.kiro/**

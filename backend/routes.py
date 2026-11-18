@@ -1,0 +1,198 @@
+"""Kiro Crew App routes (`backend.routes:register_routes`) and core API dispatcher.
+
+Conforms strictly to Kiro Crew 0.12.2 `RouteRegistry.register_app_routes(app_name, app_dir, hook_path, ctx)`:
+- `register_routes(ctx: AppContext) -> list[ForemanRoute]` returns a list of route objects
+  with `.method`, `.path` (relative to `/api/apps/ghost-foreman`), and `.handler(request, ctx)`.
+- Performs no heavy DB/network I/O inside `register_routes()`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Tuple
+
+
+@dataclass
+class ForemanRoute:
+    """Structural match for `kiro_crew.apps.route_registry.AppRoute` (`_route_fields`)."""
+
+    method: str
+    path: str
+    handler: Callable[[Any, Any], Awaitable[Any]]
+
+
+def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = None) -> Tuple[int, Dict[str, Any]]:
+    """Framework-agnostic API dispatcher used by both Kiro Crew Gateway routes and the local dev server."""
+    from backend.hooks import get_runtime
+
+    store, adapter, supervisor = get_runtime()
+    payload = body or {}
+
+    # Normalize path so both `/dashboard` (RouteRegistry relative) and `/api/apps/ghost-foreman/dashboard` work
+    rel_path = path
+    for prefix in ("/api/apps/ghost-foreman", "/api"):
+        if rel_path.startswith(prefix):
+            rel_path = rel_path[len(prefix) :] or "/"
+            break
+
+    if method == "GET" and rel_path == "/dashboard":
+        with store._conn() as conn:
+            projects = [dict(r) for r in conn.execute("SELECT * FROM projects ORDER BY priority ASC").fetchall()]
+            budgets = [dict(r) for r in conn.execute("SELECT * FROM provider_budgets").fetchall()]
+            audits = [dict(r) for r in conn.execute("SELECT * FROM decisions_audit ORDER BY created_at DESC LIMIT 30").fetchall()]
+            ideas = [dict(r) for r in conn.execute("SELECT * FROM ideas ORDER BY created_at DESC").fetchall()]
+            news = [dict(r) for r in conn.execute("SELECT * FROM news_items ORDER BY created_at DESC").fetchall()]
+            meetings_raw = conn.execute("SELECT * FROM meetings ORDER BY created_at DESC").fetchall()
+            lease_row = dict(conn.execute("SELECT * FROM desktop_leases WHERE device_id = 'main-workstation'").fetchone())
+            lease_row["queue"] = json.loads(lease_row.pop("queue_json", "[]"))
+
+        meetings = []
+        for m in meetings_raw:
+            md = dict(m)
+            md["participants"] = json.loads(md.pop("participants_json", "[]"))
+            md["rounds"] = json.loads(md.pop("rounds_json", "[]"))
+            md["summary"] = json.loads(md.pop("summary_json", "{}"))
+            meetings.append(md)
+
+        slots = adapter.list_slots()
+        questions = supervisor.list_questions()
+        policies = supervisor.list_policies()
+        mode_state = store.get_state("foreman_mode", {})
+        mode_state["gateway_mode"] = adapter.gateway_mode
+
+        return 200, {
+            "app": "ghost-foreman",
+            "version": "0.2.0",
+            "mode_state": mode_state,
+            "projects": projects,
+            "slots": slots,
+            "questions": questions,
+            "policies": policies,
+            "budgets": budgets,
+            "audits": audits,
+            "meetings": meetings,
+            "ideas": ideas,
+            "news": news,
+            "desktop_lease": lease_row,
+        }
+
+    if method == "POST" and rel_path == "/questions":
+        q = supervisor.receive_agent_question(
+            slot_id=payload.get("slot_id", "slot-01"),
+            raw_question=payload["raw_question"],
+            kind=payload.get("kind", "natural_question"),
+            question_id=payload.get("question_id"),
+            options=payload.get("options"),
+            proposes_spec_change=bool(payload.get("proposes_spec_change", False)),
+            conflict_with_slot=payload.get("conflict_with_slot", ""),
+        )
+        return 200, q
+
+    if method == "POST" and rel_path == "/questions/inquire":
+        q = supervisor.ask_ghost_about_question(
+            question_id=payload["question_id"],
+            human_inquiry=payload["human_inquiry"],
+            re_probe_agent=bool(payload.get("re_probe_agent", True)),
+        )
+        return 200, q
+
+    if method == "POST" and rel_path == "/questions/resolve":
+        q = supervisor.resolve_question_by_human(
+            question_id=payload["question_id"],
+            answer_text=payload["answer_text"],
+            memory_mode=payload.get("memory_mode", "one_time"),
+            policy_scope=payload.get("policy_scope", "project"),
+            policy_title=payload.get("policy_title", ""),
+            policy_keywords=payload.get("policy_keywords"),
+            batch_apply_same_project=bool(payload.get("batch_apply_same_project", False)),
+        )
+        return 200, q
+
+    if method == "POST" and rel_path == "/meetings":
+        mtg = supervisor.run_brainstorm_meeting(
+            project_id=payload.get("project_id", "proj-game"),
+            topic=payload["topic"],
+            participants=payload.get("participants"),
+        )
+        return 200, mtg
+
+    if method == "POST" and rel_path == "/meetings/adopt":
+        res = supervisor.adopt_meeting_option(
+            meeting_id=payload["meeting_id"],
+            option_id=payload["option_id"],
+            target_slot_id=payload.get("target_slot_id", "slot-03"),
+        )
+        return 200, res
+
+    if method == "POST" and rel_path == "/slots":
+        slot = adapter.create_managed_slot(
+            project_id=payload.get("project_id", "proj-game"),
+            name=payload["name"],
+            backend=payload.get("backend", "claude-code"),
+            role=payload.get("role", "実装担当"),
+            current_task=payload["current_task"],
+            next_task=payload.get("next_task", ""),
+            worktree_branch=payload.get("worktree_branch", ""),
+        )
+        return 200, slot
+
+    if method == "POST" and rel_path == "/stop":
+        res = adapter.stop_control(
+            scope=payload.get("scope", "all"),
+            target_id=payload.get("target_id", ""),
+        )
+        return 200, res
+
+    if method == "POST" and rel_path == "/mode":
+        mode_state = store.get_state("foreman_mode", {})
+        mode_state["mode"] = payload.get("mode", mode_state.get("mode", "away"))
+        if "quiet_until" in payload:
+            mode_state["quiet_until"] = payload["quiet_until"]
+        store.set_state("foreman_mode", mode_state)
+        return 200, mode_state
+
+    if method == "POST" and rel_path == "/desktop-lease":
+        res = supervisor.control_desktop_lease(
+            action=payload.get("action", "reclaim_for_human"),
+            slot_id=payload.get("slot_id", "slot-05"),
+        )
+        return 200, res
+
+    return 404, {"error": f"Unknown endpoint: {method} {path}", "code": "not_found"}
+
+
+def register_routes(ctx: Any = None) -> List[ForemanRoute]:
+    """Return list of route objects for Kiro Crew's `RouteRegistry.register_app_routes`."""
+
+    def _make_handler(rel_path: str) -> Callable[[Any, Any], Awaitable[Any]]:
+        async def _handler(request: Any, app_ctx: Any = None) -> Any:
+            from aiohttp import web
+
+            body = None
+            if request.method in ("POST", "PUT", "PATCH"):
+                try:
+                    body = await request.json()
+                except Exception:
+                    body = {}
+            status, data = await asyncio.to_thread(dispatch_api_request, request.method, rel_path, body)
+            if status == 404:
+                return web.json_response(data, status=404)
+            return web.json_response(data, status=200)
+
+        return _handler
+
+    route_specs = [
+        ("GET", "/dashboard"),
+        ("POST", "/questions"),
+        ("POST", "/questions/inquire"),
+        ("POST", "/questions/resolve"),
+        ("POST", "/meetings"),
+        ("POST", "/meetings/adopt"),
+        ("POST", "/slots"),
+        ("POST", "/stop"),
+        ("POST", "/mode"),
+        ("POST", "/desktop-lease"),
+    ]
+    return [ForemanRoute(method=m, path=p, handler=_make_handler(p)) for m, p in route_specs]

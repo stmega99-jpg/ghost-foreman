@@ -1,0 +1,87 @@
+# 👻 Ghost Foreman — 幽霊現場監督 (Kiro Crew App)
+
+**Your agents work. You have a life.**  
+*AIたちは働く。あなたには生活がある。*
+
+Built for **Kiroween 2026** (**Frankenstein Category** & **Best Kiro Crew App Bonus Prize**).
+
+---
+
+## 1. What is Ghost Foreman?
+
+When running 10–18+ concurrent coding and creative AI sessions (Claude Code, Codex, Kiro Bots), **the human becomes the bottleneck**—constantly interrupted by routine confirmation prompts, ambiguous design questions, and cross-agent specification conflicts.
+
+**Ghost Foreman** is an installable **Kiro Crew App** (`app.json`) that acts as an autonomous site foreman between you and your multi-agent workspace:
+- **Proxy Decisions with Citations (代理判断)**: Answers routine agent questions automatically by citing locked project specifications and Selective Memory.
+- **Pre-flight Reverse-Probing (事前逆質問)**: When an agent asks an open-ended question not covered by current policies, Ghost Foreman probes the agent *first* for option trade-offs and file impacts before escalating a clean decision card to your smartphone.
+- **Bidirectional Human Q&A & Selective Memory (双方向質問・選択的記憶)**: Ask Ghost Foreman follow-up questions (*"JSONとSQLiteの違いは？今回ならどちらが便利？"*), then resolve once (`one_time`) or promote your decision to a permanent project rule (`permanent_policy`) with scoped batch resolution.
+- **AI Brainstorming Room & Idea Vault (AI会議室・企画秘書)**: Run structured multi-agent ideation (`Independent Ideation → Mutual Critique → Ghost Synthesis`) and convert adopted proposals directly into scheduled slot tasks.
+- **Free-Tier Router & Budget Guard (無料API枠優先ルーティング)**: Uses authorized free API tiers (e.g., Gemini Free Tier) for supervision and summarization, and strictly blocks unauthorized fallback to paid per-token APIs.
+- **Project News & Desktop Lease (制作ニュース収集・PC操作権管理)**: Separates verified facts from estimates in industry news, and manages exclusive PC screen/input leases for automated playtesting with immediate human preemption.
+
+---
+
+## 2. Frankenstein Architecture (Custom Brain × Kiro Crew Host)
+
+| Feature Area | Implementation Strategy | How It Works |
+|---|---|---|
+| **Proxy Decisions & Reverse-Probing** | **Custom Implementation** | `ForemanSupervisor` triages questions against `PolicyStore`, probes agents for impact, blocks locked-spec violations, and logs every decision to `decisions_audit`. |
+| **Multi-Session & Worktree Management** | **Uses Kiro Crew Host** | Uses Kiro Crew's `/api/chat/slots` (**Ghost Foreman Managed Slots**) + MCP consultation bridge (`foreman_ask`) to respect Kiro Crew's cross-session privacy boundaries. |
+| **Notifications & Remote Control** | **Uses Kiro Crew Host** | Leverages Kiro Crew's PWA Push Notifications & event bus with Ghost Foreman's Resident / Away / Sleep mode filtering. |
+| **Brainstorming & Selective Memory** | **Custom Implementation** | Multi-round ideation/critique engine and versioned Global/Project policy promotion. |
+| **Free-Tier Routing & News** | **Custom + SDK Telemetry** | Prioritizes Gemini Free Tier / host-included bots and combines `/api/sessions/usage` with explicit `measured` / `estimated` / `unknown` cost labels. |
+| **Desktop Lease & Voice** | **Tech Verification + Web Speech** | Exclusive workstation lease reservation with instant human reclaim + Web Speech API voice briefing readout for commuting/gym use. |
+
+---
+
+## 3. Repository Structure
+
+```text
+ghost-foreman/
+├── app.json                         # Official Kiro Crew App Manifest
+├── .kiro/                           # Kiroween required specs & steering rules
+│   ├── specs/ghost-foreman.md
+│   └── steering/foreman-rules.md
+├── agents/
+│   └── ghost-foreman-agent.json     # Custom supervisor agent definition
+├── skills/
+│   └── foreman-protocol/SKILL.md    # Agent consultation skill
+├── backend/
+│   ├── store.py                     # SQLite persistent storage & idempotency
+│   ├── crew_adapter.py              # Managed Slots & Kiro Crew Gateway adapter
+│   ├── supervisor.py                # Proxy judgment, reverse-probe, meetings, budget router
+│   ├── hooks.py                     # on_startup / on_shutdown lifecycle hooks
+│   ├── routes.py                    # register_routes for Kiro Crew Gateway
+│   └── mcp_server.py                # MCP consultation server for external sessions
+├── dist/
+│   └── index.mjs                    # @kirocrew/app-sdk React dashboard module
+├── ui/
+│   └── index.html                   # Desktop & Mobile responsive Halloween UI
+├── dev_server.py                    # Standalone local server & simulator
+└── verify_phase1_and_2.py           # Automated acceptance test suite
+```
+
+---
+
+## 4. Installation & Usage
+
+### A. Inside Kiro Crew (0.12+)
+1. Copy or symlink this repository into `~/.kiro/crew/apps/ghost-foreman`.
+2. Enable **Ghost Foreman** in the Kiro Crew App Store / Dashboard (`/apps/ghost-foreman`).
+
+### B. Standalone Local Demo & Verification
+Run the automated acceptance test suite (verifies all 8 core acceptance criteria):
+```bash
+python verify_phase1_and_2.py
+```
+
+Launch the interactive Desktop & Mobile Web UI:
+```bash
+python dev_server.py
+# Open http://127.0.0.1:8765/apps/ghost-foreman
+```
+
+---
+
+## 5. License
+MIT License — see [LICENSE](./LICENSE).

@@ -1,0 +1,82 @@
+{
+  "name": "ghost-foreman",
+  "version": "0.2.0",
+  "title": "Ghost Foreman",
+  "displayName": "Ghost Foreman — 幽霊現場監督",
+  "description": "Your agents work. You have a life. Autonomous foreman for multi-agent Kiro Crew workspaces: spec-grounded proxy decisions, reverse-probing, selective memory, AI brainstorming rooms, free-tier routing, and project news.",
+  "author": "Ghost Foreman Team",
+  "license": "MIT",
+  "minKiroCrewVersion": "0.12.0",
+  "tags": [
+    "orchestration",
+    "supervision",
+    "multi-agent",
+    "brainstorming",
+    "kiroween",
+    "frankenstein"
+  ],
+  "ui": {
+    "entry": "dist/index.mjs",
+    "pages": [
+      {
+        "route": "/apps/ghost-foreman",
+        "label": "Ghost Foreman",
+        "icon": "Ghost"
+      }
+    ]
+  },
+  "backend": {
+    "hooks": {
+      "routes": "backend.routes:register_routes",
+      "on_startup": "backend.hooks:on_startup",
+      "on_shutdown": "backend.hooks:on_shutdown"
+    }
+  },
+  "agents": [
+    "agents/ghost-foreman-agent.json"
+  ],
+  "skills": [
+    "skills/foreman-protocol"
+  ],
+  "mcpServers": {
+    "ghost-foreman-mcp": {
+      "command": "python",
+      "args": ["-m", "backend.mcp_server"]
+    }
+  },
+  "permissions": {
+    "api": [
+      "/api/slots",
+      "/api/chat/slots",
+      "/api/approvals",
+      "/api/sessions",
+      "/api/sessions/usage",
+      "/api/agents",
+      "/api/crons",
+      "/api/status"
+    ],
+    "events": [
+      "notification",
+      "slots",
+      "sessions",
+      "onChatChunk",
+      "onChatDone",
+      "onToolCall",
+      "onConnectionChange"
+    ],
+    "mcpTools": [
+      "foreman_ask",
+      "foreman_report_status",
+      "foreman_get_policies",
+      "cron_add",
+      "cron_list"
+    ],
+    "storage": true,
+    "cron": true,
+    "memory": "app-scoped",
+    "network": true,
+    "jobs": true,
+    "spawn": true,
+    "sessionApproval": true
+  }
+}
