@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Tuple
 
+from .halt import EmergencyStopped
 from .store import _now_iso as _now
 
 
@@ -79,6 +80,7 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             "news": news,
             "desktop_lease": lease_row,
             "usage": supervisor.llm.usage_summary(),
+            "halt": adapter.halt.snapshot(),
             "notifications": supervisor.notifier.recent(20),
         }
 
@@ -189,6 +191,8 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             scope=payload.get("scope", "all"),
             target_id=payload.get("target_id", ""),
         )
+        if str(payload.get("scope", "")).startswith("resume"):
+            res["released_questions"] = supervisor.release_held_questions()
         return 200, res
 
     if method == "POST" and rel_path == "/mode":
@@ -236,6 +240,8 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
                     body = {}
             try:
                 status, data = await asyncio.to_thread(dispatch_api_request, request.method, rel_path, body)
+            except EmergencyStopped as exc:
+                return web.json_response({"error": str(exc), "code": "emergency_stop"}, status=409)
             except (KeyError, ValueError, TypeError) as exc:
                 # Bad input or an unknown id is the caller's error, not a server fault.
                 return web.json_response({"error": f"{type(exc).__name__}: {exc}", "code": "bad_request"}, status=400)

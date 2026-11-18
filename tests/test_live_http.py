@@ -72,5 +72,26 @@ class TokenHandling(unittest.TestCase):
         self.assertLess(lg.TOKEN_CACHE_SECS, 300)
 
 
+class StopDoesNotLeaveAutoRestart(unittest.TestCase):
+    def test_queue_is_emptied_before_and_after_the_stop_call(self):
+        live = object.__new__(lg.LiveGateway)
+        calls = []
+        queues = [[{"id": "q1"}, {"id": "q2"}], [{"id": "q3"}]]  # what is queued before the stop / appears right after
+
+        def fake_http(method, path, body=None):
+            calls.append((method, path))
+            if method == "GET":
+                return {"queue": queues.pop(0)}
+            return {"ok": True}
+
+        live._http = fake_http
+        cancelled = live.stop_slot("gf-x")
+        self.assertEqual(cancelled, 3)
+        order = [(m, p.rsplit("/", 1)[-1]) for m, p in calls]
+        stop_at = order.index(("POST", "stop"))
+        self.assertEqual([c for c in order[:stop_at] if c[0] == "DELETE"], [("DELETE", "q1"), ("DELETE", "q2")], "queue emptied BEFORE the stop")
+        self.assertEqual([c for c in order[stop_at + 1 :] if c[0] == "DELETE"], [("DELETE", "q3")], "and again AFTER it")
+
+
 if __name__ == "__main__":
     unittest.main()

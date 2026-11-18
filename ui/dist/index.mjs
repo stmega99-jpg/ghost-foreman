@@ -25,6 +25,7 @@ const STATUS = {
   probing: ["担当AIへ逆質問中…", C.accent],
   needs_human_approval: ["ツール承認待ち", C.warn],
   held_spec_violation: ["仕様変更を保留", C.bad],
+  held_emergency_stop: ["緊急停止中に受信（再開後に判断）", C.bad],
   auto_resolved: ["自動回答済み", C.ok],
   human_resolved: ["回答済み", C.ok],
   batch_resolved: ["一括回答済み", C.ok],
@@ -109,6 +110,8 @@ function Inbox({ d, call, focusQ }) {
 }
 
 // ------------------------------------------------------------------ slots
+const slotHalted = (d, s) => !!(d.halt && (d.halt.all || (d.halt.projects || []).includes(s.project_id) || (d.halt.slots || []).includes(s.id)));
+
 function Slots({ d, call }) {
   return h(
     "div",
@@ -120,13 +123,15 @@ function Slots({ d, call }) {
         { key: s.id, style: S.card },
         h("div", { style: { ...S.row, justifyContent: "space-between" } },
           h("strong", null, `${s.id} ${s.name}`),
-          h("span", { style: S.row }, h(Badge, { text: s.is_live ? "実接続" : "模擬", color: s.is_live ? C.ok : C.warn }), h(Badge, { text: s.status }))
+          h("span", { style: S.row }, h(Badge, { text: s.is_live ? "実接続" : "模擬", color: s.is_live ? C.ok : C.warn }), slotHalted(d, s) ? h(Badge, { text: "停止中（人間の許可待ち）", color: C.bad }) : null, h(Badge, { text: s.status }))
         ),
         h("div", null, `案件 ${s.project_id} / 役割 ${s.role} / ${s.backend}`),
         h("div", null, "現在の仕事: " + s.current_task),
         s.waiting_reason ? h("div", { style: { color: C.warn } }, "待機理由: " + s.waiting_reason) : null,
         s.next_task ? h("div", { style: S.mute }, "次の予約: " + s.next_task) : null,
-        h("div", { style: { ...S.row, marginTop: 8 } }, h("button", { style: S.btnBad, onClick: () => call("POST", "/stop", { scope: "slot", target_id: s.id }) }, "⏹ 停止"))
+        h("div", { style: { ...S.row, marginTop: 8 } },
+          h("button", { style: S.btnBad, onClick: () => call("POST", "/stop", { scope: "slot", target_id: s.id }) }, "⏹ 停止"),
+          d.halt && (d.halt.slots || []).includes(s.id) ? h("button", { style: S.btnOk, onClick: () => { if (window.confirm(s.name + " の停止を解除し、再開を許可しますか？\n（解除しても自動では作業を始めません）")) call("POST", "/stop", { scope: "resume_slot", target_id: s.id }); } }, "▶ この停止を解除") : null)
       )
     )
   );
@@ -286,6 +291,9 @@ export default function GhostForemanApp() {
   useEffect(() => { const t = setInterval(refresh, busy ? 5000 : 20000); return () => clearInterval(t); }, [refresh, busy]);
 
   if (!d) return h("div", { style: S.page }, error ? "接続エラー: " + error : "👻 Ghost Foreman 起動中…");
+  const resumeAll = () => {
+    if (window.confirm("停止を解除し、再開を許可しますか？\n\n・解除しても、止まっていた作業は自動では再開しません\n・停止中に届いた確認は、人間の判断待ちとして表示されます")) call("POST", "/stop", { scope: "resume_all" });
+  };
   const live = d.mode_state && d.mode_state.gateway_mode === "live_gateway";
   const pending = d.questions.filter(isPending).length;
   const body = { inbox: Inbox, slots: Slots, meetings: Meetings, policies: Policies, news: News, settings: Settings, audit: Audit }[tab];
@@ -296,8 +304,17 @@ export default function GhostForemanApp() {
         h(Badge, { text: live ? "Gateway実接続" : "模擬モード", color: live ? C.ok : C.warn }),
         h("select", { style: { ...S.input, flex: "0 0 auto" }, value: (d.mode_state && d.mode_state.mode) || "away", onChange: (e) => call("POST", "/mode", { mode: e.target.value }) },
           h("option", { value: "resident" }, "🏠 常駐（通知しない）"), h("option", { value: "away" }, "🚃 離席（判断待ちを通知）"), h("option", { value: "sleep" }, "🌙 おやすみ（朝にまとめて通知）")),
-        h("button", { style: S.btnBad, onClick: () => { if (window.confirm("すべての実スロットを停止します。よろしいですか？")) call("POST", "/stop", { scope: "all" }); } }, "🛑 全停止"),
-        h("button", { style: S.btnOk, onClick: () => call("POST", "/stop", { scope: "resume_all" }) }, "▶ 全再開"))),
+        h("button", { style: S.btnBad, onClick: () => { if (window.confirm("すべての実スロットを停止します。人間が再開を許可するまで、自動では何も再開されません。よろしいですか？")) call("POST", "/stop", { scope: "all" }); } }, "🛑 全停止"),
+        h("button", { style: S.btnOk, onClick: () => resumeAll() }, "▶ 停止を解除"))),
+    d.halt && d.halt.active
+      ? h("div", { style: { ...S.card, borderColor: C.bad, background: "#2a0a14" } },
+          h("strong", { style: { color: C.bad, fontSize: 16 } }, "🛑 緊急停止中"),
+          h("div", null, "人間が再開を許可するまで、自動回答・自動発注・メッセージ送信・会議の開催・ツールの自動承認は行いません。停止中に届いた確認は、解除後も自動では回答せず、判断待ちとして表示します。"),
+          h("div", { style: S.mute }, "対象: " + (d.halt.all ? "すべて" : [...(d.halt.projects || []).map((p) => "案件 " + p), ...(d.halt.slots || []).map((x) => "スロット " + x)].join(", ")) + "　開始: " + (d.halt.since || "")),
+          h("div", { style: { ...S.row, marginTop: 8 } },
+            h("button", { style: S.btnOk, onClick: () => resumeAll() }, "▶ 停止をすべて解除（再開を許可）"),
+            ...(d.halt.all ? [] : (d.halt.projects || []).map((p) => h("button", { key: "p" + p, style: S.btn, onClick: () => { if (window.confirm("案件 " + p + " の停止を解除しますか？")) call("POST", "/stop", { scope: "resume_project", target_id: p }); } }, "案件 " + p + " だけ解除")))))
+      : null,
     error ? h("div", { style: { ...S.card, borderColor: C.bad, color: C.bad } }, error) : null,
     h("div", { style: { ...S.row, marginBottom: 10 } }, ...TABS.map(([k, t]) => h("button", { key: k, style: { ...S.btn, ...(tab === k ? { background: C.accent, color: "#0d0b18" } : {}) }, onClick: () => setTab(k) }, t + (k === "inbox" && pending ? ` (${pending})` : "")))),
     h(body, { d, call, focusQ })

@@ -25,7 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("ghost-foreman.live")
 
@@ -62,6 +62,7 @@ class LiveGateway:
         self._token = ""
         self._token_ts = 0.0
         self.approved_count = 0
+        self.halt_check: Optional[Callable[[str], bool]] = None  # set by the adapter: live_key -> is a stop in force?
         self._approval_future = asyncio.run_coroutine_threadsafe(self._approval_loop(), loop)
 
     @staticmethod
@@ -184,6 +185,8 @@ class LiveGateway:
     def _approve_foreman_tools_once(self) -> int:
         done = 0
         for key in list(self.leases):
+            if self.halt_check is not None and self.halt_check(key):
+                continue  # emergency stop in force: approve nothing automatically
             slot = self.state.get_slot(key)
             if slot is None or not getattr(slot, "_approval_futures", None):
                 continue
@@ -254,9 +257,32 @@ class LiveGateway:
         if lease is not None and not lease.released:
             await lease.release()
 
-    def stop_slot(self, key: str) -> None:
-        """Interrupt whatever the real session is doing (Gateway's own stop route). Worker-thread safe."""
+    def clear_queue(self, key: str) -> int:
+        """Cancel every message waiting in the Gateway's queue for this slot. Returns how many were cancelled.
+
+        Needed because the Gateway starts the next queued message as soon as a stopped turn ends: without this a
+        stop would be followed by an automatic restart of work.
+        """
+        quoted = urllib.parse.quote(key)
+        detail = self._http("GET", f"/api/chat/slots/{quoted}") or {}
+        cancelled = 0
+        for entry in detail.get("queue") or []:
+            qid = entry.get("id") or entry.get("queue_id") if isinstance(entry, dict) else None
+            if qid:
+                self._http("DELETE", f"/api/chat/slots/{urllib.parse.quote(key)}/queue/{urllib.parse.quote(str(qid))}")
+                cancelled += 1
+        return cancelled
+
+    def stop_slot(self, key: str) -> int:
+        """Emergency-stop a real session so that it does not start again by itself.
+
+        Order matters: empty the queue first (nothing left to drain), interrupt the running turn, then empty the queue
+        again for anything that arrived in between. Returns the number of queued messages cancelled.
+        """
+        cancelled = self.clear_queue(key)
         self._http("POST", f"/api/chat/slots/{urllib.parse.quote(key)}/stop", {})
+        cancelled += self.clear_queue(key)
+        return cancelled
 
     async def delete(self, key: str) -> None:
         """Release the lease and remove the slot from the Gateway (best effort)."""

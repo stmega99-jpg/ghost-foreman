@@ -90,4 +90,25 @@ expect("slot stop -> POST /stop scope=slot", calls.some((c) => c[1] && c[1].ends
 calls.length = 0;
 await clickText("全停止");
 expect("全停止 confirms then POST /stop scope=all", calls.some((c) => c[1] && c[1].endsWith("/stop") && c[2].scope === "all"));
+// emergency stop banner: shown while a hold is active, and only an explicit confirmed click lifts it
+const halted = JSON.parse(JSON.stringify(dash));
+halted.halt = { all: false, projects: [], slots: [halted.slots[0].id], since: "2026-11-18T00:00:00", reason: "x", active: true };
+globalThis.__api.get = async () => JSON.parse(JSON.stringify(halted));
+await act(async () => { root.render(React.createElement(App, { key: "halted" })); });
+await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+expect("stop banner is shown while a hold is active", text().includes("緊急停止中") && text().includes("人間が再開を許可するまで"));
+await clickText("スロット");
+expect("the stopped slot is marked as waiting for human permission", text().includes("停止中（人間の許可待ち）"));
+calls.length = 0; globalThis.__confirms.length = 0;
+await clickText("▶ この停止を解除");
+expect("slot resume asks first, then POST /stop resume_slot", globalThis.__confirms.length === 1 && calls.some((c) => c[1] && c[1].endsWith("/stop") && c[2].scope === "resume_slot" && c[2].target_id === halted.slots[0].id));
+calls.length = 0; globalThis.__confirms.length = 0;
+await clickText("停止をすべて解除");
+expect("global resume asks first (and says nothing restarts by itself), then POST /stop resume_all", globalThis.__confirms.length === 1 && globalThis.__confirms[0].includes("自動では再開しません") && calls.some((c) => c[1] && c[1].endsWith("/stop") && c[2].scope === "resume_all"));
+const noHalt = JSON.parse(JSON.stringify(dash));
+noHalt.halt = { all: false, projects: [], slots: [], since: "", reason: "", active: false };
+globalThis.__api.get = async () => JSON.parse(JSON.stringify(noHalt));
+await act(async () => { root.render(React.createElement(App, { key: "nohalt" })); });
+await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+expect("no banner when nothing is stopped", !text().includes("🛑 緊急停止中"));
 process.exit(process.exitCode || 0);
