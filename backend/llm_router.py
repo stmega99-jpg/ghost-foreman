@@ -45,7 +45,7 @@ class LlmResult:
     model: str
     input_tokens: int
     output_tokens: int
-    cost_usd: float
+    cost_usd: Optional[float]  # None = unconfirmed. No provider here exposes a billed amount, so it is never 0.0.
     note: str
     switched_from: str = ""
 
@@ -89,7 +89,7 @@ class LlmRouter:
     def _record(self, provider_id: str, model: str, task: str, tin: int, tout: int, ok: bool, note: str, basis: str) -> None:
         with self.store._conn() as conn:
             conn.execute(
-                "INSERT INTO llm_usage (ts, provider_id, model, task, input_tokens, output_tokens, cost_usd, cost_basis, ok, note) VALUES (?, ?, ?, ?, ?, ?, 0.0, ?, ?, ?)",
+                "INSERT INTO llm_usage (ts, provider_id, model, task, input_tokens, output_tokens, cost_usd, cost_basis, ok, note) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
                 (_now_iso(), provider_id, model, task, tin, tout, basis, 1 if ok else 0, note[:300]),
             )
 
@@ -114,7 +114,7 @@ class LlmRouter:
                 self._bump_quota(GEMINI_ID)
                 self._set_status(GEMINI_ID, "available")
                 self._record(GEMINI_ID, res.model, task, res.input_tokens, res.output_tokens, True, "ok", "free tier (token counts measured)")
-                return LlmResult(res.text, GEMINI_ID, res.model, res.input_tokens, res.output_tokens, 0.0, "Gemini公式無料枠を使用")
+                return LlmResult(res.text, GEMINI_ID, res.model, res.input_tokens, res.output_tokens, None, "Gemini公式無料枠を使用（請求額は未確認）")
             except GeminiQuotaExhausted as exc:
                 wait = min(max(exc.retry_after_secs or DEFAULT_COOLDOWN_SECS, 60.0), MAX_COOLDOWN_SECS)
                 self.store.set_state("gemini_cooldown_until", self._clock() + wait)
@@ -137,7 +137,7 @@ class LlmRouter:
             try:
                 text = self._ask_kiro(prompt, system, scope)
                 self._record(KIRO_ID, "kiro-session", task, 0, 0, True, "; ".join(notes)[:200], "included in plan (usage not exposed: unknown)")
-                return LlmResult(text, KIRO_ID, "kiro-session", 0, 0, 0.0, "Kiro Crew 標準枠の実セッションで判定。" + " ".join(notes), switched_from)
+                return LlmResult(text, KIRO_ID, "kiro-session", 0, 0, None, "Kiro Crew 標準枠の実セッションで判定。" + " ".join(notes), switched_from)
             except Exception as exc:  # noqa: BLE001
                 notes.append(f"Kiro判定: {exc}")
         raise LlmUnavailable("; ".join(notes) or "no provider available")
@@ -177,11 +177,20 @@ class LlmRouter:
             totals = [dict(r) for r in conn.execute(
                 "SELECT provider_id, COUNT(*) AS calls, SUM(ok) AS ok_calls, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cost_usd) AS cost_usd FROM llm_usage GROUP BY provider_id"
             ).fetchall()]
+            for t in totals:
+                # SUM over only-NULL rows is NULL: keep it NULL and say so, never show it as $0.
+                t["cost_display"] = "未確認" if t["cost_usd"] is None else f"${t['cost_usd']:.4f}"
             recent = [dict(r) for r in conn.execute("SELECT * FROM llm_usage ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
         return {
             "totals": totals,
             "recent": recent,
             "gemini_cooldown_until": self._cooldown_until(),
             "allow_unpublished_to_free_tier": self.allow_confidential_to_free_tier(),
+            "actual_billing": "未確認",
+            "billing_note": (
+                "実際の請求額はAPIから取得できません。Gemini無料枠のみの利用なら通常は発生しませんが、アプリでは確認できないため"
+                "「未確認」と表示しています。Google AI Studio / Cloud Billing の請求画面で確認してください。"
+                "Kiro の判定は契約枠内で、使用量はホストが公開していません。"
+            ),
             "paid_api": "not implemented: no path to a metered paid API exists",
         }

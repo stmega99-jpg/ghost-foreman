@@ -63,7 +63,8 @@ class ForemanSupervisor:
                     "allowed": True,
                     "provider_id": "gemini-free",
                     "display_name": gemini["display_name"],
-                    "cost_usd": 0.0,
+                    "cost_usd": None,
+                    "cost_note": "請求額は未確認（模擬モードの計数）",
                     "note": f"公式無料枠を使用 ({gemini['free_quota_used'] + 1}/{gemini['free_quota_limit']})",
                 }
 
@@ -79,7 +80,8 @@ class ForemanSupervisor:
                     "allowed": True,
                     "provider_id": "kiro-bot",
                     "display_name": kiro_bot["display_name"],
-                    "cost_usd": 0.0,
+                    "cost_usd": None,
+                    "cost_note": "請求額は未確認（模擬モードの計数）",
                     "switched_from": "gemini-free",
                     "note": "Gemini無料枠が上限に達したため、有料APIには切り替えず Kiro Crew 標準枠へ自動切替しました。",
                 }
@@ -153,7 +155,8 @@ class ForemanSupervisor:
         try:
             res = self.llm.complete("policy_match", prompt, system, json_mode=True, confidential=True, scope=project_id)
         except LlmUnavailable as exc:
-            return self.match_policy(project_id, question), f"keyword（判定AI利用不可: {exc}）"
+            # No keyword fallback on live slots: a word match can answer the wrong question. Hold for the human.
+            return None, f"判定AIが利用できないため自動回答せず人間の判断待ちにしました（{exc}）"
         data = extract_json(res.text) or {}
         try:
             conf = float(data.get("confidence") or 0.0)
@@ -359,7 +362,7 @@ class ForemanSupervisor:
 
         # 4a. Real session: reverse-probe the asking agent for real and wait for its actual answer.
         if not options and not conflict_with_slot and slot.get("is_live"):
-            return self._start_live_probe(qid, slot, kind, raw_question, now)
+            return self._start_live_probe(qid, slot, kind, raw_question, now, judge_note)
 
         # 4. Unknown policy: Perform Reverse-Probe (逆質問) first if options/impact are missing (Spec A-3, A-4)
         probe_history: List[Dict[str, str]] = []
@@ -437,7 +440,7 @@ class ForemanSupervisor:
     # ------------------------------------------------------------------
     PROBE_TIMEOUT_SECS = 300.0
 
-    def _start_live_probe(self, qid: str, slot: Dict[str, Any], kind: str, raw_question: str, now: str) -> Dict[str, Any]:
+    def _start_live_probe(self, qid: str, slot: Dict[str, Any], kind: str, raw_question: str, now: str, judge_note: str = "") -> Dict[str, Any]:
         marker = f"[foreman-probe:{qid}]"
         probe_prompt = (
             f"{marker}\n"
@@ -448,6 +451,8 @@ class ForemanSupervisor:
             '"recommendation":"推奨するid","reason":"推奨理由"}'
         )
         probe_history = [{"role": "ghost_foreman_probe", "text": probe_prompt, "ts": now}]
+        if judge_note:
+            probe_history.insert(0, {"role": "ghost_judgement", "text": judge_note, "ts": now})
         with self.store._conn() as conn:
             conn.execute(
                 """

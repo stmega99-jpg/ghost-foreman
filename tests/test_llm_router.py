@@ -125,5 +125,147 @@ class SsrfGuard(unittest.TestCase):
                 validate_public_url(url)
 
 
+class DnsRebinding(unittest.TestCase):
+    """The connection must go to the IP that was validated, never to a later DNS answer."""
+
+    def setUp(self):
+        import backend.news as news
+
+        self.news = news
+        self.addCleanup(setattr, news.socket, "create_connection", news.socket.create_connection)
+
+    def test_connects_to_validated_ip_and_resolves_once(self):
+        calls = []
+
+        def rebinding_resolver(host, port, proto=0):
+            calls.append(host)
+            ip = "93.184.216.34" if len(calls) == 1 else "127.0.0.1"  # 2nd answer would be the attack
+            return [(2, 1, 6, "", (ip, port))]
+
+        targets = []
+
+        def fake_create_connection(addr, timeout=None):
+            targets.append(addr)
+            raise OSError("blocked in test")
+
+        self.news.socket.create_connection = fake_create_connection
+        with self.assertRaises(OSError):
+            self.news.fetch_text("http://rebind.example/page", resolver=rebinding_resolver)
+        self.assertEqual(calls, ["rebind.example"], "exactly one resolution per hop")
+        self.assertEqual(targets, [("93.184.216.34", 80)], "must connect to the validated IP only")
+
+    def test_https_verifies_original_hostname_not_ip(self):
+        seen = {}
+
+        class FakeCtx:
+            def wrap_socket(self, sock, server_hostname=None):
+                seen["server_hostname"] = server_hostname
+                raise OSError("stop")
+
+        self.news.socket.create_connection = lambda addr, timeout=None: seen.setdefault("addr", addr) and object()
+        conn = self.news._PinnedHTTPSConnection("www.example.com", 443, ["93.184.216.34"], 5)
+        conn._context = FakeCtx()
+        with self.assertRaises(OSError):
+            conn.connect()
+        self.assertEqual(seen["addr"], ("93.184.216.34", 443))
+        self.assertEqual(seen["server_hostname"], "www.example.com")
+
+    def test_redirect_to_internal_host_is_blocked(self):
+        news = self.news
+
+        class FakeResp:
+            status = 302
+            headers = {}
+
+            def getheader(self, name):
+                return "http://internal.example/admin" if name == "Location" else None
+
+        class FakeConn:
+            def __init__(self, *a, **k):
+                pass
+
+            def request(self, *a, **k):
+                pass
+
+            def getresponse(self):
+                return FakeResp()
+
+            def close(self):
+                pass
+
+        def resolver(host, port, proto=0):
+            ip = "93.184.216.34" if host == "public.example" else "10.0.0.7"
+            return [(2, 1, 6, "", (ip, port))]
+
+        original = news._PinnedHTTPConnection
+        news._PinnedHTTPConnection = FakeConn
+        self.addCleanup(setattr, news, "_PinnedHTTPConnection", original)
+        with self.assertRaises(UnsafeUrl):
+            news.fetch_text("http://public.example/start", resolver=resolver)
+
+    def test_any_private_answer_among_several_is_rejected(self):
+        def resolver(host, port, proto=0):
+            return [(2, 1, 6, "", ("93.184.216.34", port)), (2, 1, 6, "", ("192.168.1.10", port))]
+
+        with self.assertRaises(UnsafeUrl):
+            validate_public_url("http://mixed.example/", resolver=resolver)
+
+
+class HoldInsteadOfKeywordFallback(unittest.TestCase):
+    def test_live_question_is_held_for_human_when_no_judge_is_available(self):
+        from backend.supervisor import ForemanSupervisor
+
+        rec = Recorder(lambda url: (503, {"error": {"message": "busy"}}))
+        router, store = make_router(rec, allow_confidential=True)
+        sup = ForemanSupervisor(store, router.adapter)
+        sup.llm = router
+        question = "有料APIの課金を有効にしてよいですか？ 無料枠のクォータが尽きた"
+        # sanity: the old keyword rule WOULD have auto-answered this
+        self.assertIsNotNone(sup.match_policy("proj-foreman", question))
+        policy, note = sup._judge_policy("proj-foreman", question, {"is_live": True})
+        self.assertIsNone(policy, "must not fall back to keyword matching on a live slot")
+        self.assertIn("人間の判断待ち", note)
+
+    def test_simulated_slots_keep_keyword_rule(self):
+        from backend.supervisor import ForemanSupervisor
+
+        router, store = make_router(Recorder(lambda url: (200, ok_body())))
+        sup = ForemanSupervisor(store, router.adapter)
+        policy, note = sup._judge_policy("proj-foreman", "有料APIの課金を有効にしてよいですか？ 無料枠のクォータ", {"is_live": False})
+        self.assertIsNotNone(policy)
+        self.assertIn("模擬", note)
+
+
+class CostIsNeverShownAsZero(unittest.TestCase):
+    def test_usage_cost_is_unconfirmed(self):
+        router, store = make_router(Recorder(lambda url: (200, ok_body("x"))))
+        res = router.complete("news", "public", confidential=False)
+        self.assertIsNone(res.cost_usd)
+        summary = router.usage_summary()
+        self.assertIsNone(summary["totals"][0]["cost_usd"])
+        self.assertEqual(summary["totals"][0]["cost_display"], "未確認")
+        self.assertEqual(summary["actual_billing"], "未確認")
+        self.assertIsNone(summary["recent"][0]["cost_usd"])
+
+    def test_old_database_with_zero_costs_is_migrated_to_unconfirmed(self):
+        import sqlite3
+
+        tmp = tempfile.mkdtemp()
+        path = os.path.join(tmp, "old.db")
+        conn = sqlite3.connect(path)
+        conn.execute(
+            "CREATE TABLE llm_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, provider_id TEXT NOT NULL, model TEXT NOT NULL DEFAULT '',"
+            " task TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,"
+            " cost_usd REAL NOT NULL DEFAULT 0.0, cost_basis TEXT NOT NULL DEFAULT '', ok INTEGER NOT NULL DEFAULT 1, note TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute("INSERT INTO llm_usage (ts, provider_id, cost_usd) VALUES ('t', 'gemini-free', 0.0)")
+        conn.commit()
+        conn.close()
+        store = ForemanStore(db_path=path)
+        with store._conn() as c:
+            row = c.execute("SELECT cost_usd FROM llm_usage").fetchone()
+        self.assertIsNone(row["cost_usd"], "an assumed $0 must become unconfirmed, not stay 0")
+
+
 if __name__ == "__main__":
     unittest.main()

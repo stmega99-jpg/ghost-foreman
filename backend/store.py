@@ -49,13 +49,30 @@ class ForemanStore:
                 task TEXT NOT NULL DEFAULT '',
                 input_tokens INTEGER NOT NULL DEFAULT 0,
                 output_tokens INTEGER NOT NULL DEFAULT 0,
-                cost_usd REAL NOT NULL DEFAULT 0.0,
+                cost_usd REAL,
                 cost_basis TEXT NOT NULL DEFAULT '',
                 ok INTEGER NOT NULL DEFAULT 1,
                 note TEXT NOT NULL DEFAULT ''
             )
             """
         )
+        # cost_usd must be NULL ("unconfirmed") when no billed amount is known; an earlier build stored 0.0 here.
+        info = {r["name"]: r for r in conn.execute("PRAGMA table_info(llm_usage)").fetchall()}
+        if info.get("cost_usd") is not None and info["cost_usd"]["notnull"]:
+            conn.executescript(
+                """
+                ALTER TABLE llm_usage RENAME TO llm_usage_old;
+                CREATE TABLE llm_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, provider_id TEXT NOT NULL,
+                    model TEXT NOT NULL DEFAULT '', task TEXT NOT NULL DEFAULT '',
+                    input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cost_usd REAL, cost_basis TEXT NOT NULL DEFAULT '', ok INTEGER NOT NULL DEFAULT 1, note TEXT NOT NULL DEFAULT ''
+                );
+                INSERT INTO llm_usage (id, ts, provider_id, model, task, input_tokens, output_tokens, cost_usd, cost_basis, ok, note)
+                    SELECT id, ts, provider_id, model, task, input_tokens, output_tokens, NULL, cost_basis, ok, note FROM llm_usage_old;
+                DROP TABLE llm_usage_old;
+                """
+            )
         if "live_key" not in cols:
             # Non-empty live_key marks a slot backed by a real Kiro Crew Gateway slot.
             conn.execute("ALTER TABLE managed_slots ADD COLUMN live_key TEXT NOT NULL DEFAULT ''")

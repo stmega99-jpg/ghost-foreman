@@ -1,22 +1,26 @@
 """News collector (Spec I): fetch a public page, summarise it with an LLM, keep facts and inferences apart.
 
-The page is untrusted data: it is fetched with SSRF protection (public addresses only, redirects re-validated),
-size-limited, reduced to text, and handed to the model with an instruction not to follow anything inside it.
-The result is only stored; it never triggers orders or tool use by itself.
+The page is untrusted data: it is fetched with SSRF protection, size-limited, reduced to text, and handed to the
+model with an instruction not to follow anything inside it. The result is only stored; it never triggers orders or
+tool use by itself.
+
+SSRF / DNS-rebinding protection: the host is resolved exactly ONCE per hop, every returned address must be public,
+and the TCP connection is then made to that validated IP (not to the name), so a DNS answer that changes between
+"check" and "connect" cannot redirect the request to an internal address. HTTPS still verifies the certificate
+against the original host name (SNI). Redirects are followed manually and each hop goes through the same steps.
 """
 
 from __future__ import annotations
 
 import html
+import http.client
 import ipaddress
 import re
 import socket
-import urllib.error
+import ssl
 import urllib.parse
-import urllib.request
 import uuid
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .llm_router import LlmRouter
 from .meeting import extract_json
@@ -27,50 +31,102 @@ MAX_TEXT_CHARS = 12_000
 MAX_REDIRECTS = 3
 FETCH_TIMEOUT_SECS = 15
 
+Resolver = Callable[..., Any]
+
 
 class UnsafeUrl(ValueError):
     pass
 
 
-def validate_public_url(url: str) -> str:
-    """Return *url* if it is http(s) and every address its host resolves to is public; else raise UnsafeUrl."""
+def resolve_public(host: str, port: int, resolver: Resolver = socket.getaddrinfo) -> List[str]:
+    """Resolve *host* once; return its addresses only if ALL of them are public."""
+    try:
+        infos = resolver(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise UnsafeUrl(f"host does not resolve: {exc}") from exc
+    ips: List[str] = []
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise UnsafeUrl(f"host resolves to a non-public address ({ip})")
+        if str(ip) not in ips:
+            ips.append(str(ip))
+    if not ips:
+        raise UnsafeUrl("host has no addresses")
+    return ips
+
+
+def parse_public_url(url: str, resolver: Resolver = socket.getaddrinfo) -> Tuple[urllib.parse.ParseResult, int, List[str]]:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise UnsafeUrl("only http(s) URLs with a host are allowed")
     if parsed.username or parsed.password:
         raise UnsafeUrl("URLs with embedded credentials are not allowed")
-    try:
-        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
-        raise UnsafeUrl(f"host does not resolve: {exc}") from exc
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if not ip.is_global:
-            raise UnsafeUrl(f"host resolves to a non-public address ({ip})")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return parsed, port, resolve_public(parsed.hostname, port, resolver)
+
+
+def validate_public_url(url: str, resolver: Resolver = socket.getaddrinfo) -> str:
+    """Return *url* if it is http(s) and every address its host resolves to is public; else raise UnsafeUrl."""
+    parse_public_url(url, resolver)
     return url
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
-        return None
+def _connect_pinned(ips: Sequence[str], port: int, timeout: float) -> socket.socket:
+    last: Optional[Exception] = None
+    for ip in ips:  # all of these were validated as public
+        try:
+            return socket.create_connection((ip, port), timeout)
+        except OSError as exc:
+            last = exc
+    raise last or OSError("no address to connect to")
 
 
-def fetch_text(url: str) -> Dict[str, str]:
-    opener = urllib.request.build_opener(_NoRedirect)
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host: str, port: int, ips: Sequence[str], timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self._ips = list(ips)
+
+    def connect(self) -> None:
+        self.sock = _connect_pinned(self._ips, self.port, self.timeout)
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, port: int, ips: Sequence[str], timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout, context=ssl.create_default_context())
+        self._ips = list(ips)
+
+    def connect(self) -> None:
+        raw = _connect_pinned(self._ips, self.port, self.timeout)
+        # Certificate and SNI are checked against the ORIGINAL host name, not the pinned IP.
+        self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+
+
+def fetch_text(url: str, resolver: Resolver = socket.getaddrinfo) -> Dict[str, str]:
     current = url
     for _ in range(MAX_REDIRECTS + 1):
-        validate_public_url(current)
-        req = urllib.request.Request(current, headers={"User-Agent": "GhostForeman/0.3 (+news collector)", "Accept": "text/html,text/plain"})
+        parsed, port, ips = parse_public_url(current, resolver)  # resolves once for this hop
+        cls = _PinnedHTTPSConnection if parsed.scheme == "https" else _PinnedHTTPConnection
+        conn = cls(parsed.hostname, port, ips, FETCH_TIMEOUT_SECS)
         try:
-            with opener.open(req, timeout=FETCH_TIMEOUT_SECS) as resp:
-                raw = resp.read(MAX_BYTES + 1)[:MAX_BYTES]
-                charset = resp.headers.get_content_charset() or "utf-8"
-                break
-        except urllib.error.HTTPError as exc:
-            if exc.code in (301, 302, 303, 307, 308) and exc.headers.get("Location"):
-                current = urllib.parse.urljoin(current, exc.headers["Location"])
+            target = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+            conn.request(
+                "GET",
+                target,
+                headers={"User-Agent": "GhostForeman/0.3 (+news collector)", "Accept": "text/html,text/plain", "Accept-Encoding": "identity", "Connection": "close"},
+            )
+            resp = conn.getresponse()
+            location = resp.getheader("Location")
+            if resp.status in (301, 302, 303, 307, 308) and location:
+                current = urllib.parse.urljoin(current, location)
                 continue
-            raise
+            if resp.status != 200:
+                raise ValueError(f"the page returned HTTP {resp.status}")
+            raw = resp.read(MAX_BYTES + 1)[:MAX_BYTES]
+            charset = resp.headers.get_content_charset() or "utf-8"
+            break
+        finally:
+            conn.close()
     else:
         raise UnsafeUrl("too many redirects")
     page = raw.decode(charset, errors="replace")

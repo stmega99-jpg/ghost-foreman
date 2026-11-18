@@ -78,6 +78,7 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             "ideas": ideas,
             "news": news,
             "desktop_lease": lease_row,
+            "usage": supervisor.llm.usage_summary(),
         }
 
     if method == "POST" and rel_path == "/questions":
