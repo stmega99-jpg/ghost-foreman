@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from .crew_adapter import CrewAdapter
+from .meeting import MeetingEngine
 from .store import ForemanStore, _now_iso
 
 
@@ -16,6 +17,7 @@ class ForemanSupervisor:
     def __init__(self, store: ForemanStore, adapter: CrewAdapter) -> None:
         self.store = store
         self.adapter = adapter
+        self.meetings = MeetingEngine(store, adapter)
 
     # ------------------------------------------------------------------
     # Spec C: Free-Tier & Budget Router
@@ -116,9 +118,24 @@ class ForemanSupervisor:
                 best_hits = hits
                 best_match = pol
 
-        if best_hits >= 2:
+        if best_match is not None and best_hits >= min(2, len(best_match["keywords"])):
             return best_match
         return None
+
+    _STOP_WORDS = {"どちら", "すべき", "ですか", "したい", "ください", "について", "こと", "もの", "これ", "それ", "ため", "場合", "どう", "the", "and", "for", "with", "should", "which"}
+
+    @classmethod
+    def extract_keywords(cls, text: str, limit: int = 6) -> List[str]:
+        """Pick distinctive terms (ASCII words, katakana, kanji runs) from a question + answer for rule matching."""
+        import re
+
+        found: List[str] = []
+        for m in re.finditer(r"[A-Za-z][A-Za-z0-9_+.#-]{2,}|[ァ-ヴー]{2,}|[一-龥]{2,}", text):
+            w = m.group(0)
+            if w.lower() in cls._STOP_WORDS or w in found:
+                continue
+            found.append(w)
+        return found[:limit] or [text[:12]]
 
     # ------------------------------------------------------------------
     # Spec A: Proxy Decision, Reverse-Probing, Spec Guard & Escalation
@@ -565,7 +582,7 @@ class ForemanSupervisor:
             promoted_policy_id = f"pol-{uuid.uuid4().hex[:6]}"
             target_project = "*" if policy_scope == "global" else q["project_id"]
             title = policy_title or f"人間裁定ルール ({q['project_id']})"
-            kws = policy_keywords or [w for w in ["SQLite", "JSON", "キャッシュ", "インベントリ"] if w.lower() in (q["raw_question"] + answer_text).lower()] or [q["raw_question"][:12]]
+            kws = policy_keywords or self.extract_keywords(q["raw_question"] + " " + answer_text)
             with self.store._conn() as conn:
                 conn.execute(
                     """
@@ -673,6 +690,10 @@ class ForemanSupervisor:
         participants: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Run a structured AI Meeting: Step 1 Independent Ideation -> Step 2 Mutual Critique -> Step 3 Ghost Synthesis."""
+        if self.adapter.live is not None:
+            # Real meeting: participants are live agent slots; `participants` (optional) are their perspectives.
+            return self.meetings.start(project_id, topic, participants)
+        # --- SIMULATED fallback (no Gateway bound): canned text, labelled as such ---
         chosen = participants or ["Claude-Code #1 (設計視点)", "Codex #1 (実装・負荷視点)", "Gemini-Worker #1 (プレイヤー体験視点)"]
         self.route_supervisor_llm("brainstorm")
         now = _now_iso()
@@ -719,7 +740,8 @@ class ForemanSupervisor:
                 {"id": "adopt_rich", "label": "演出重視案（案3）を採用してシェーダー担当へ発注する"},
                 {"id": "hold_as_idea", "label": "まだ制作には移さず、アイデア帳（Idea Vault）に議事録として保存のみ行う"},
             ],
-            "note": "※相談段階のため、人間が採用ボタンを押すまで勝手に実装タスクへは移しません（仕様D準拠）。",
+            "note": "【模擬】Gateway未接続の固定サンプルです。実AIによる会議ではありません。人間が採用ボタンを押すまで制作には移しません。",
+            "live": False,
         }
 
         with self.store._conn() as conn:
@@ -741,20 +763,16 @@ class ForemanSupervisor:
         return self.get_meeting(meeting_id)
 
     def get_meeting(self, meeting_id: str) -> Dict[str, Any]:
-        with self.store._conn() as conn:
-            row = conn.execute("SELECT * FROM meetings WHERE id = ?", (meeting_id,)).fetchone()
-            if not row:
-                raise ValueError(f"Unknown meeting_id: {meeting_id}")
-            d = dict(row)
-            d["participants"] = json.loads(d.pop("participants_json", "[]"))
-            d["rounds"] = json.loads(d.pop("rounds_json", "[]"))
-            d["summary"] = json.loads(d.pop("summary_json", "{}"))
-            return d
+        return self.meetings.get(meeting_id)
 
     def adopt_meeting_option(self, meeting_id: str, option_id: str, target_slot_id: str = "slot-03") -> Dict[str, Any]:
         """Convert an adopted meeting conclusion into a scheduled task on a Managed Slot (only when human approves)."""
         mtg = self.get_meeting(meeting_id)
         now = _now_iso()
+        if mtg["status"] != "awaiting_human_adoption":
+            raise ValueError(f"meeting {meeting_id} is '{mtg['status']}' and cannot be adopted (finished or already adopted)")
+        if option_id not in {o.get("id") for o in mtg["summary"].get("options_for_human", [])}:
+            raise ValueError(f"unknown option_id for meeting {meeting_id}: {option_id}")
         if option_id == "hold_as_idea":
             idea_id = f"idea-{uuid.uuid4().hex[:6]}"
             with self.store._conn() as conn:
@@ -772,11 +790,14 @@ class ForemanSupervisor:
                 (f"[会議採用案] {mtg['topic']} ({option_id})", now, target_slot_id),
             )
             conn.execute("UPDATE meetings SET status = 'adopted_and_scheduled' WHERE id = ?", (meeting_id,))
+        chosen = next((o for o in mtg["summary"].get("options_for_human", []) if o.get("id") == option_id), {})
+        detail = f"\n採用案: {chosen.get('label', option_id)}\n内容: {chosen.get('detail', '')}" if chosen else ""
+        target = self.adapter.get_slot(target_slot_id)
         self.adapter.send_message(
             target_slot_id,
-            f"【AI会議室の採用決定】『{mtg['topic']}』について人間が『{option_id}』を採用しました。次のタスクとして予約しました。",
+            f"【AI会議室の採用決定】『{mtg['topic']}』について人間が『{option_id}』を採用しました。次のタスクとして実施してください。{detail}",
             sender="ghost_foreman",
-            resume_work=False,
+            resume_work=bool(target and target.get("is_live")),
         )
         return {"meeting_id": meeting_id, "action": "scheduled_to_slot", "slot_id": target_slot_id}
 

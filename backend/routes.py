@@ -204,7 +204,11 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
                     body = await request.json()
                 except Exception:
                     body = {}
-            status, data = await asyncio.to_thread(dispatch_api_request, request.method, rel_path, body)
+            try:
+                status, data = await asyncio.to_thread(dispatch_api_request, request.method, rel_path, body)
+            except (KeyError, ValueError, TypeError) as exc:
+                # Bad input or an unknown id is the caller's error, not a server fault.
+                return web.json_response({"error": f"{type(exc).__name__}: {exc}", "code": "bad_request"}, status=400)
             if status == 404:
                 return web.json_response(data, status=404)
             return web.json_response(data, status=200)

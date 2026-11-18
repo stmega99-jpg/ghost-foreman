@@ -324,6 +324,18 @@
       await refresh();
     }
 
+    function esc(v) {
+      return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    function escBr(v) { return esc(v).replace(/\n/g, "<br/>"); }
+    function jsArg(v) { return esc(JSON.stringify(String(v ?? ""))); }
+    setInterval(() => {
+      if (state && (state.meetings.some(m => m.status === "running") || state.questions.some(q => q.status === "probing"))) refresh();
+    }, 5000);
+    async function newMeeting(projectId) {
+      const topic = prompt("会議の議題を入力してください");
+      if (topic && topic.trim()) await demoStartMeeting(topic.trim(), projectId);
+    }
     async function demoStartMeeting(customTopic, projectId) {
       const topic = customTopic || "雨のステージで足場が滑る仕掛けと操作感のバランス案";
       await api("POST", "/api/apps/ghost-foreman/meetings", {
@@ -358,17 +370,22 @@
         answer_text: answerText,
         memory_mode: memoryMode,
         policy_scope: "project",
-        policy_title: "インベントリ検索キャッシュ規約 (人間裁定)",
+        policy_title: "人間裁定: " + String((state.questions.find(x => x.id === questionId) || {}).raw_question || "").slice(0, 30),
         batch_apply_same_project: batchCheckbox ? batchCheckbox.checked : false
       });
       await refresh();
     }
 
     async function adoptMeeting(meetingId, optionId) {
+      const m = state.meetings.find(x => x.id === meetingId);
+      const target = state.slots.find(s => s.is_live && m && s.project_id === m.project_id && s.role !== "会議参加者" && s.role !== "議事整理")
+        || state.slots.find(s => m && s.project_id === m.project_id)
+        || state.slots[0];
+      if (!target && optionId !== "hold_as_idea") { alert("発注先のスロットがありません。先にスロットを作成してください。"); return; }
       await api("POST", "/api/apps/ghost-foreman/meetings/adopt", {
         meeting_id: meetingId,
         option_id: optionId,
-        target_slot_id: "slot-03"
+        target_slot_id: target ? target.id : ""
       });
       await refresh();
     }
@@ -434,19 +451,20 @@
         }
         content.innerHTML = state.questions.map(q => {
           const isPending = q.status.startsWith("needs_human") || q.status.startsWith("held");
+          if (q.status === "probing") { /* real reverse-probe in flight */ }
           const badgeClass = q.status === "auto_resolved" ? "badge-ok" : (q.status.startsWith("held") ? "badge-danger" : "badge-warn");
           const probesHtml = (q.probe_history || []).map(p => `
-            <div class="probe-log"><strong>[${p.role}]</strong> ${p.text.replace(/\n/g, "<br/>")}</div>
+            <div class="probe-log"><strong>[${esc(p.role)}]</strong> ${escBr(p.text)}</div>
           `).join("");
           const optionsHtml = (q.options || []).map(opt => `
             <div class="option-box">
-              <strong>${opt.label}</strong>
-              ${opt.difference ? `<p>違い: ${opt.difference}</p>` : ""}
-              ${opt.impact ? `<p>影響範囲: ${opt.impact}</p>` : ""}
+              <strong>${esc(opt.label)}</strong>
+              ${opt.difference ? `<p>違い: ${esc(opt.difference)}</p>` : ""}
+              ${opt.impact ? `<p>影響範囲: ${esc(opt.impact)}</p>` : ""}
               ${isPending ? `
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
-                  <button class="btn-primary" onclick="resolveQuestion('${q.id}', '${opt.label} を採用', 'one_time')">今回のみこの案で回答</button>
-                  <button class="btn-emerald" onclick="resolveQuestion('${q.id}', '${opt.label} を標準規約として採用', 'permanent_policy')">🧠 恒久ルール（選択的記憶）に昇格して回答</button>
+                  <button class="btn-primary" onclick="resolveQuestion(${jsArg(q.id)}, ${jsArg(opt.label + ' を採用')}, 'one_time')">今回のみこの案で回答</button>
+                  <button class="btn-emerald" onclick="resolveQuestion(${jsArg(q.id)}, ${jsArg(opt.label + ' を標準規約として採用')}, 'permanent_policy')">🧠 恒久ルール（選択的記憶）に昇格して回答</button>
                 </div>
               ` : ""}
             </div>
@@ -458,16 +476,16 @@
                 <span class="badge">${q.project_id} / ${q.slot_id}</span>
                 <span class="badge ${badgeClass}">${q.status}</span>
               </div>
-              <h3>AIからの確認: ${q.raw_question}</h3>
-              <p>${q.context_summary}</p>
-              ${q.recommendation ? `<p style="color:#d8b4fe;"><strong>👻 幽霊の推奨:</strong> ${q.recommendation} — ${q.recommendation_reason}</p>` : ""}
+              <h3>AIからの確認: ${esc(q.raw_question)}</h3>
+              <p>${escBr(q.context_summary)}</p>
+              ${q.recommendation ? `<p style="color:#d8b4fe;"><strong>👻 幽霊の推奨:</strong> ${esc(q.recommendation)} — ${esc(q.recommendation_reason)}</p>` : ""}
               ${probesHtml}
               ${optionsHtml}
-              ${q.final_answer ? `<div class="probe-log" style="border-color:#10b981;"><strong>[送信済み回答]</strong><br/>${q.final_answer.replace(/\n/g, "<br/>")}</div>` : ""}
+              ${q.final_answer ? `<div class="probe-log" style="border-color:#10b981;"><strong>[送信済み回答]</strong><br/>${escBr(q.final_answer)}</div>` : ""}
               ${isPending ? `
                 <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border-purple); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                   <input id="inquire-${q.id}" style="flex:1; min-width:240px;" value="JSONとSQLiteの違いは？今回ならどちらが便利？" />
-                  <button onclick="askGhostFollowup('${q.id}')">💬 幽霊＆担当AIに質問で返す</button>
+                  <button onclick="askGhostFollowup(${jsArg(q.id)})">💬 幽霊＆担当AIに質問で返す</button>
                   <label style="font-size:12px; color:var(--accent-soft);">
                     <input type="checkbox" id="batch-${q.id}" /> 同一案件（${q.project_id}）の同種確認にも一括適用（他案件へは漏洩させない）
                   </label>
@@ -480,14 +498,15 @@
         content.innerHTML = `<div class="slot-grid">` + state.slots.map(s => `
           <div class="card">
             <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-              <span class="badge">${s.id} (${s.backend})</span>
+              <span class="badge">${esc(s.id)} (${esc(s.backend)})</span>
+              <span class="badge ${s.is_live ? 'badge-ok' : 'badge-warn'}">${s.is_live ? '実接続 (Gateway)' : '模擬 (simulated)'}</span>
               <span class="badge ${s.ownership === 'managed' ? 'badge-ok' : 'badge-warn'}">${s.ownership === 'managed' ? 'Managed Slot (全権限)' : 'External MCP (相談窓口)'}</span>
             </div>
-            <h3>${s.name}</h3>
-            <p><strong>案件:</strong> ${s.project_id} | <strong>役割:</strong> ${s.role}</p>
-            <p><strong>現在の仕事:</strong> ${s.current_task}</p>
-            ${s.waiting_reason ? `<p style="color:#fcd34d;"><strong>待機理由:</strong> ${s.waiting_reason}</p>` : ""}
-            <p><strong>次の予約タスク:</strong> ${s.next_task || "未予約"} | <strong>Branch:</strong> <code>${s.worktree_branch}</code></p>
+            <h3>${esc(s.name)}</h3>
+            <p><strong>案件:</strong> ${esc(s.project_id)} | <strong>役割:</strong> ${esc(s.role)}</p>
+            <p><strong>現在の仕事:</strong> ${esc(s.current_task)}</p>
+            ${s.waiting_reason ? `<p style="color:#fcd34d;"><strong>待機理由:</strong> ${esc(s.waiting_reason)}</p>` : ""}
+            <p><strong>次の予約タスク:</strong> ${esc(s.next_task) || "未予約"} | <strong>Branch:</strong> <code>${esc(s.worktree_branch)}</code></p>
             <div style="display:flex; gap:6px; margin-top:8px;">
               <button onclick="emergencyStop('slot', '${s.id}')" class="btn-danger">停止</button>
               <span class="badge">状態: ${s.status}</span>
@@ -497,38 +516,39 @@
       } else if (currentTab === "meetings") {
         const ideasHtml = state.ideas.map(i => `
           <div class="option-box">
-            <strong>💡 一時保存アイデア: ${i.title}</strong> (${i.project_id})
-            <p>${i.content}</p>
-            <button class="btn-primary" onclick="demoStartMeeting('${i.title}', '${i.project_id}')">このアイデアでAI会議室を開く</button>
+            <strong>💡 一時保存アイデア: ${esc(i.title)}</strong> (${esc(i.project_id)})
+            <p>${escBr(i.content)}</p>
+            <button class="btn-primary" onclick="demoStartMeeting(${jsArg(i.title)}, ${jsArg(i.project_id)})">このアイデアでAI会議室を開く</button>
           </div>
         `).join("");
         const mtgsHtml = state.meetings.map(m => `
           <div class="card">
             <div style="display:flex; justify-content:space-between;">
-              <span class="badge">${m.project_id}</span>
-              <span class="badge badge-warn">${m.status}</span>
+              <span class="badge">${esc(m.project_id)}</span>
+              <span class="badge ${m.summary.live === false ? 'badge-warn' : 'badge-ok'}">${m.summary.live === false ? '模擬' : '実AI'}</span>
+              <span class="badge badge-warn">${esc(m.status)}${m.status === 'running' ? ' (進行中…)' : ''}</span>
             </div>
-            <h3>💬 議題: ${m.topic}</h3>
-            <p>参加AI: ${m.participants.join(" / ")}</p>
+            <h3>💬 議題: ${esc(m.topic)}</h3>
+            <p>参加AI: ${m.participants.map(esc).join(" / ")}</p>
             ${m.rounds.map(r => `
               <div class="probe-log">
-                <strong>${r.phase}</strong><br/>
-                ${r.entries.map(e => `・<strong>${e.speaker}:</strong> ${e.proposal || e.critique}`).join("<br/>")}
+                <strong>${esc(r.phase)}</strong><br/>
+                ${r.entries.map(e => `・<strong>${esc(e.speaker)}:</strong> ${escBr(e.proposal || e.critique)}`).join("<br/>")}
               </div>
             `).join("")}
             <div class="option-box">
-              <strong>👻 幽霊の論点整理:</strong> ${m.summary.consensus}<br/>
-              <span style="font-size:12px; color:#fcd34d;">対立点: ${m.summary.conflict_points}</span><br/>
-              <span style="font-size:11px; color:var(--text-muted);">${m.summary.note}</span>
+              <strong>👻 幽霊の論点整理:</strong> ${escBr(m.summary.consensus || (m.status === 'running' ? '会議の進行中です…' : ''))}<br/>
+              <span style="font-size:12px; color:#fcd34d;">対立点: ${escBr(m.summary.conflict_points || '')}</span><br/>
+              ${m.summary.unresolved ? `<br/><span style="font-size:12px;">未決事項: ${escBr(m.summary.unresolved)}</span>` : ""}<br/><span style="font-size:11px; color:var(--text-muted);">${esc(m.summary.note || "")}</span>
               <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
                 ${(m.summary.options_for_human || []).map(o => `
-                  <button class="btn-primary" onclick="adoptMeeting('${m.id}', '${o.id}')">${o.label}</button>
+                  <button class="btn-primary" title="${esc(o.detail || '')}" onclick="adoptMeeting(${jsArg(m.id)}, ${jsArg(o.id)})">${esc(o.label)}</button>
                 `).join("")}
               </div>
             </div>
           </div>
         `).join("");
-        content.innerHTML = `<div class="card"><h3>💡 思いつきアイデア帳 (Idea Vault)</h3>${ideasHtml}</div>` + mtgsHtml;
+        content.innerHTML = `<div class="card"><h3>💡 思いつきアイデア帳 (Idea Vault)</h3>${ideasHtml}<button class="btn-primary" onclick="newMeeting('proj-foreman')">＋ 新しいAI会議を開く（実エージェント）</button></div>` + mtgsHtml;
       } else if (currentTab === "policies") {
         content.innerHTML = state.policies.map(p => `
           <div class="card">

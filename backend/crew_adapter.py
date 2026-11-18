@@ -96,6 +96,7 @@ class CrewAdapter:
         next_task: str = "",
         worktree_branch: str = "",
         live: Optional[bool] = None,
+        send_intro: bool = True,
     ) -> Dict[str, Any]:
         """Create a Ghost Foreman managed slot.
 
@@ -106,8 +107,9 @@ class CrewAdapter:
         if use_live and self.live is None:
             raise RuntimeError("live slot requested but no Gateway is bound")
         with self.store._conn() as conn:
-            count = conn.execute("SELECT COUNT(*) AS c FROM managed_slots").fetchone()["c"]
-            slot_id = f"slot-{count + 1:02d}"
+            ids = [r["id"] for r in conn.execute("SELECT id FROM managed_slots").fetchall()]
+            nums = [int(i.split("-")[1]) for i in ids if i.startswith("slot-") and i.split("-")[1].isdigit()]
+            slot_id = f"slot-{(max(nums) if nums else 0) + 1:02d}"
         live_key = ""
         if use_live:
             key = f"gf-{project_id}-{slot_id}"
@@ -133,7 +135,7 @@ class CrewAdapter:
                 (slot_id, project_id, name, backend, role, current_task, next_task, branch,
                  json.dumps(initial_history, ensure_ascii=False), now, live_key),
             )
-        if live_key:
+        if live_key and send_intro:
             intro = (
                 f"あなたは Ghost Foreman の管理スロット {slot_id}（案件: {project_id} / 役割: {role}）です。\n"
                 f"最初の仕事: {current_task}\n\n"
@@ -144,6 +146,17 @@ class CrewAdapter:
             )
             self.send_message(slot_id, intro, sender="ghost_foreman", resume_work=True)
         return self.get_slot(slot_id)  # type: ignore[return-value]
+
+    def retire_slot(self, slot_id: str) -> None:
+        """Release and delete an ephemeral slot (e.g. a meeting participant) from the Gateway and the DB."""
+        slot = self.get_slot(slot_id)
+        if slot and slot.get("live_key") and self.live is not None:
+            try:
+                self.live.call(self.live.delete(slot["live_key"]))
+            except Exception:  # noqa: BLE001 - best effort; the DB row is removed regardless
+                pass
+        with self.store._conn() as conn:
+            conn.execute("DELETE FROM managed_slots WHERE id = ?", (slot_id,))
 
     def get_slot_history(self, slot_id: str, limit: int = 50) -> Dict[str, Any]:
         """Retrieve message history for a Managed Slot, enforcing ownership checks."""

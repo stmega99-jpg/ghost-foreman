@@ -245,6 +245,14 @@ class LiveGateway:
         if lease is not None and not lease.released:
             await lease.release()
 
+    async def delete(self, key: str) -> None:
+        """Release the lease and remove the slot from the Gateway (best effort)."""
+        await self.stop(key)
+        try:
+            await asyncio.to_thread(self._http, "DELETE", f"/api/chat/slots/{urllib.parse.quote(key)}")
+        except Exception:  # noqa: BLE001
+            logger.debug("gateway slot delete failed for %s", key, exc_info=True)
+
     async def release_all(self) -> None:
         self._approval_future.cancel()
         for key in list(self.leases):
