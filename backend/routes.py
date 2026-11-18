@@ -13,6 +13,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Tuple
 
+from .store import _now_iso as _now
+
 
 @dataclass
 class ForemanRoute:
@@ -25,7 +27,7 @@ class ForemanRoute:
 
 def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = None) -> Tuple[int, Dict[str, Any]]:
     """Framework-agnostic API dispatcher used by both Kiro Crew Gateway routes and the local dev server."""
-    from backend.hooks import get_runtime
+    from .hooks import get_runtime
 
     store, adapter, supervisor = get_runtime()
     payload = body or {}
@@ -138,6 +140,30 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
         )
         return 200, slot
 
+    if method == "GET" and rel_path == "/policies":
+        return 200, {"policies": supervisor.list_policies(project_id=payload.get("project_id") or None)}
+
+    if method == "POST" and rel_path == "/slots/report":
+        # Record only: the report comes FROM the agent, so it must not be echoed back into its session.
+        with store._conn() as conn:
+            conn.execute(
+                "UPDATE managed_slots SET waiting_reason = ?, updated_at = ? WHERE id = ? AND status != 'stopped'",
+                (f"報告: {str(payload['status_message'])[:300]}", _now(), payload["slot_id"]),
+            )
+        return 200, adapter.get_slot(payload["slot_id"]) or {"error": "unknown slot"}
+
+    if method == "POST" and rel_path == "/slots/send":
+        res = adapter.send_message(
+            slot_id=payload["slot_id"],
+            message=payload["message"],
+            sender=payload.get("sender", "human_via_foreman"),
+            resume_work=bool(payload.get("resume_work", True)),
+        )
+        return 200, res
+
+    if method == "GET" and rel_path.startswith("/slots/history"):
+        slot_id = payload.get("slot_id") or (rel_path.split("?slot_id=", 1)[1] if "?slot_id=" in rel_path else "")
+        return 200, adapter.get_slot_history(slot_id, limit=int(payload.get("limit", 50)))
     if method == "POST" and rel_path == "/stop":
         res = adapter.stop_control(
             scope=payload.get("scope", "all"),
@@ -171,12 +197,18 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
             from aiohttp import web
 
             body = None
+            if request.method == "GET":
+                body = dict(request.query)
             if request.method in ("POST", "PUT", "PATCH"):
                 try:
                     body = await request.json()
                 except Exception:
                     body = {}
-            status, data = await asyncio.to_thread(dispatch_api_request, request.method, rel_path, body)
+            try:
+                status, data = await asyncio.to_thread(dispatch_api_request, request.method, rel_path, body)
+            except (KeyError, ValueError, TypeError) as exc:
+                # Bad input or an unknown id is the caller's error, not a server fault.
+                return web.json_response({"error": f"{type(exc).__name__}: {exc}", "code": "bad_request"}, status=400)
             if status == 404:
                 return web.json_response(data, status=404)
             return web.json_response(data, status=200)
@@ -191,6 +223,10 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
         ("POST", "/meetings"),
         ("POST", "/meetings/adopt"),
         ("POST", "/slots"),
+        ("GET", "/policies"),
+        ("POST", "/slots/report"),
+        ("POST", "/slots/send"),
+        ("GET", "/slots/history"),
         ("POST", "/stop"),
         ("POST", "/mode"),
         ("POST", "/desktop-lease"),

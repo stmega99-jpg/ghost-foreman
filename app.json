@@ -41,7 +41,7 @@
   "mcpServers": {
     "ghost-foreman-mcp": {
       "command": "python",
-      "args": ["-m", "backend.mcp_server"]
+      "args": ["backend/mcp_server.py"]
     }
   },
   "permissions": {
