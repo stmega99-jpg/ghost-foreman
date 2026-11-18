@@ -133,6 +133,16 @@ class CrewAdapter:
                 (slot_id, project_id, name, backend, role, current_task, next_task, branch,
                  json.dumps(initial_history, ensure_ascii=False), now, live_key),
             )
+        if live_key:
+            intro = (
+                f"あなたは Ghost Foreman の管理スロット {slot_id}（案件: {project_id} / 役割: {role}）です。\n"
+                f"最初の仕事: {current_task}\n\n"
+                "ルール: 設計・仕様・方針で判断に迷ったら、人間へ直接尋ねず、foreman_ask ツール"
+                f"（slot_id=\"{slot_id}\"）で現場監督（Ghost Foreman）に質問してください。"
+                "回答が返るまで、その判断に依存しない作業を進めてください。"
+                "現場監督の回答が確定ルールに基づく場合はそれに従ってください。"
+            )
+            self.send_message(slot_id, intro, sender="ghost_foreman", resume_work=True)
         return self.get_slot(slot_id)  # type: ignore[return-value]
 
     def get_slot_history(self, slot_id: str, limit: int = 50) -> Dict[str, Any]:

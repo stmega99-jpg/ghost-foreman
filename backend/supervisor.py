@@ -153,7 +153,8 @@ class ForemanSupervisor:
         now = _now_iso()
 
         # Record incoming question in slot history
-        self.adapter.send_message(slot_id, f"[AIからの確認] {raw_question}", sender="agent_question", resume_work=False)
+        if not slot.get("is_live"):  # a live slot already holds the real question in its own transcript
+            self.adapter.send_message(slot_id, f"[AIからの確認] {raw_question}", sender="agent_question", resume_work=False)
 
         # Route supervisor reasoning via Free-Tier Router
         route_info = self.route_supervisor_llm("triage")
@@ -293,6 +294,10 @@ class ForemanSupervisor:
             self.adapter.send_message(slot_id, answer_text, sender="ghost_foreman", resume_work=True)
             return self.get_question(qid)
 
+        # 4a. Real session: reverse-probe the asking agent for real and wait for its actual answer.
+        if not options and not conflict_with_slot and slot.get("is_live"):
+            return self._start_live_probe(qid, slot, kind, raw_question, now)
+
         # 4. Unknown policy: Perform Reverse-Probe (逆質問) first if options/impact are missing (Spec A-3, A-4)
         probe_history: List[Dict[str, str]] = []
         probe_count = 0
@@ -363,6 +368,116 @@ class ForemanSupervisor:
                 (now, slot_id),
             )
         return self.get_question(qid)
+
+    # ------------------------------------------------------------------
+    # Real reverse-probe against a live Gateway slot
+    # ------------------------------------------------------------------
+    PROBE_TIMEOUT_SECS = 300.0
+
+    def _start_live_probe(self, qid: str, slot: Dict[str, Any], kind: str, raw_question: str, now: str) -> Dict[str, Any]:
+        marker = f"[foreman-probe:{qid}]"
+        probe_prompt = (
+            f"{marker}\n"
+            "【Ghost Foreman からの逆質問】人間に判断を仰ぐ前に、次の確認事項の選択肢を整理してください。\n"
+            f"確認事項: {raw_question}\n\n"
+            "作業は一旦止め、次のJSONだけを返してください（説明文は不要）:\n"
+            '{"options":[{"id":"a","label":"…","difference":"他案との違い","impact":"変更範囲・影響"}],'
+            '"recommendation":"推奨するid","reason":"推奨理由"}'
+        )
+        probe_history = [{"role": "ghost_foreman_probe", "text": probe_prompt, "ts": now}]
+        with self.store._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO questions
+                (id, project_id, slot_id, kind, raw_question, context_summary, options_json, recommendation, recommendation_reason, status, probe_count, probe_history_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, '[]', '', '', 'probing', 1, ?, ?, ?)
+                """,
+                (
+                    qid, slot["project_id"], slot["id"], kind, raw_question,
+                    "制作ルールに未登録の判断事項です。幽霊が担当AIへ逆質問中です（実セッションの返答待ち）。",
+                    json.dumps(probe_history, ensure_ascii=False), now, now,
+                ),
+            )
+            conn.execute(
+                "UPDATE managed_slots SET status = 'waiting_human', waiting_reason = '幽霊が担当AIへ逆質問中', updated_at = ? WHERE id = ?",
+                (now, slot["id"]),
+            )
+        self.adapter.send_message(slot["id"], probe_prompt, sender="ghost_foreman_probe", resume_work=False)
+        self.adapter.live.watch_reply(
+            slot["live_key"], marker, lambda reply, err: self.complete_probe(qid, reply, err), timeout=self.PROBE_TIMEOUT_SECS
+        )
+        return self.get_question(qid)
+
+    @staticmethod
+    def _parse_probe_reply(reply: str) -> Optional[Dict[str, Any]]:
+        start, end = reply.find("{"), reply.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            data = json.loads(reply[start : end + 1])
+        except ValueError:
+            return None
+        opts = data.get("options")
+        if not isinstance(opts, list) or not opts:
+            return None
+        clean = []
+        for i, o in enumerate(opts):
+            if isinstance(o, dict) and o.get("label"):
+                clean.append(
+                    {
+                        "id": str(o.get("id") or f"opt{i + 1}"),
+                        "label": str(o["label"]),
+                        "difference": str(o.get("difference", "")),
+                        "impact": str(o.get("impact", "")),
+                    }
+                )
+        if not clean:
+            return None
+        return {"options": clean, "recommendation": str(data.get("recommendation", "")), "reason": str(data.get("reason", ""))}
+
+    def complete_probe(self, qid: str, reply: Optional[str], error: str = "") -> None:
+        """Store the agent's real answer to a reverse-probe and hand the question to the human."""
+        now = _now_iso()
+        with self.store._conn() as conn:
+            row = conn.execute("SELECT * FROM questions WHERE id = ?", (qid,)).fetchone()
+            if not row or row["status"] != "probing":
+                return
+            history = json.loads(row["probe_history_json"] or "[]")
+            parsed = None
+            if reply:
+                history.append({"role": "agent_clarification", "text": reply, "ts": now})
+                parsed = self._parse_probe_reply(reply)
+            if parsed:
+                options, rec = parsed["options"], parsed["recommendation"]
+                if rec not in {o["id"] for o in options}:
+                    rec = options[0]["id"]
+                reason = parsed["reason"] or "担当AIの回答に基づく推奨です。"
+                summary = "幽霊が担当AIへ逆質問し、実際の返答から選択肢と影響を整理しました。"
+            else:
+                options, rec = [], ""
+                reason = "担当AIから構造化された選択肢を得られませんでした。原文と返答をご確認ください。"
+                summary = f"逆質問を実施しましたが、整理可能な返答を得られませんでした（{error or '不明'}）。"
+                if reply:
+                    summary += f"\n担当AIの返答: {reply[:800]}"
+            conn.execute(
+                """
+                UPDATE questions SET status = 'needs_human', context_summary = ?, options_json = ?, recommendation = ?,
+                recommendation_reason = ?, probe_history_json = ?, updated_at = ? WHERE id = ?
+                """,
+                (summary, json.dumps(options, ensure_ascii=False), rec, reason, json.dumps(history, ensure_ascii=False), now, qid),
+            )
+            conn.execute(
+                "UPDATE managed_slots SET waiting_reason = '幽霊が逆質問で論点整理済 → 人間の判断待ち', updated_at = ? WHERE id = ?",
+                (now, row["slot_id"]),
+            )
+
+    def recover_probes(self) -> int:
+        """After a restart no watcher exists for 'probing' questions: hand them to the human as-is."""
+        with self.store._conn() as conn:
+            ids = [r["id"] for r in conn.execute("SELECT id FROM questions WHERE status = 'probing'").fetchall()]
+        for qid in ids:
+            self.complete_probe(qid, None, "Gateway再起動により返答待ちが中断されました")
+        return len(ids)
 
     def get_question(self, question_id: str) -> Dict[str, Any]:
         with self.store._conn() as conn:

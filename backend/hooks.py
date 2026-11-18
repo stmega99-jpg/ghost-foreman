@@ -61,6 +61,7 @@ async def on_startup(ctx: Any = None) -> None:
                 log.warning("ghost-foreman: live Gateway bridge unavailable (%s); running simulated", exc)
         if _LIVE is not None:
             adapter.reattach_live_slots()
+            get_runtime()[2].recover_probes()
         mode_state = store.get_state("foreman_mode", {})
         mode_state["gateway_mode"] = adapter.gateway_mode
         store.set_state("foreman_mode", mode_state)

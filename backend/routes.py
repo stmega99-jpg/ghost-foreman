@@ -13,6 +13,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Tuple
 
+from .store import _now_iso as _now
+
 
 @dataclass
 class ForemanRoute:
@@ -138,6 +140,18 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
         )
         return 200, slot
 
+    if method == "GET" and rel_path == "/policies":
+        return 200, {"policies": supervisor.list_policies(project_id=payload.get("project_id") or None)}
+
+    if method == "POST" and rel_path == "/slots/report":
+        # Record only: the report comes FROM the agent, so it must not be echoed back into its session.
+        with store._conn() as conn:
+            conn.execute(
+                "UPDATE managed_slots SET waiting_reason = ?, updated_at = ? WHERE id = ? AND status != 'stopped'",
+                (f"報告: {str(payload['status_message'])[:300]}", _now(), payload["slot_id"]),
+            )
+        return 200, adapter.get_slot(payload["slot_id"]) or {"error": "unknown slot"}
+
     if method == "POST" and rel_path == "/slots/send":
         res = adapter.send_message(
             slot_id=payload["slot_id"],
@@ -205,6 +219,8 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
         ("POST", "/meetings"),
         ("POST", "/meetings/adopt"),
         ("POST", "/slots"),
+        ("GET", "/policies"),
+        ("POST", "/slots/report"),
         ("POST", "/slots/send"),
         ("GET", "/slots/history"),
         ("POST", "/stop"),

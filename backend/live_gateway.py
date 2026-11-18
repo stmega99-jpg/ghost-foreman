@@ -17,7 +17,12 @@ Nothing here fabricates a reply: whatever an agent answers is read back from the
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +32,15 @@ APP_NAME = "ghost-foreman"
 WORKER_SLOT_LIMIT = 20
 DEFAULT_AGENT = "kirocrew"
 CALL_TIMEOUT_SECS = 60.0
+# Only Ghost Foreman's own consultation tools are auto-approved on its slots (via the host's
+# sessionApproval route). Every other tool request is left for the human.
+# (Host pattern trust cannot cover MCP calls that carry arguments, so approval is explicit per call.)
+FOREMAN_TOOLS = [
+    "@ghost-foreman:ghost-foreman-mcp/foreman_ask",
+    "@ghost-foreman:ghost-foreman-mcp/foreman_get_policies",
+    "@ghost-foreman:ghost-foreman-mcp/foreman_report_status",
+]
+APPROVAL_POLL_SECS = 2.0
 
 
 class LiveGatewayError(RuntimeError):
@@ -43,6 +57,10 @@ class LiveGateway:
         from kiro_crew.apps.worker_slots import set_worker_slot_limit
 
         set_worker_slot_limit(APP_NAME, WORKER_SLOT_LIMIT)
+        self._token = ""
+        self._token_ts = 0.0
+        self.approved_count = 0
+        self._approval_future = asyncio.run_coroutine_threadsafe(self._approval_loop(), loop)
 
     @staticmethod
     def _resolve_state(ctx: Any) -> Any:
@@ -133,12 +151,102 @@ class LiveGateway:
             )
         return out
 
+    # -- foreman tool approvals --------------------------------------------
+    def _http(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+        port = os.environ.get("KIROCREW_PORT", "5476")
+        base = os.environ.get("KIROCREW_GATEWAY_URL", f"http://127.0.0.1:{port}").rstrip("/")
+        now = time.time()
+        if not self._token or now - self._token_ts > 600:
+            secret = (Path.home() / ".kiro" / "crew" / "apps" / APP_NAME / ".app_secret").read_text(encoding="utf-8").strip()
+            req = urllib.request.Request(
+                f"{base}/api/apps/{APP_NAME}/token", data=b"{}", method="POST",
+                headers={"Content-Type": "application/json", "X-App-Secret": secret},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                self._token = json.loads(resp.read().decode("utf-8"))["token"]
+            self._token_ts = now
+        sep = "&" if "?" in path else "?"
+        url = f"{base}{path}{sep}{urllib.parse.urlencode({'token': self._token})}"
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8") or "null")
+
+    def _approve_foreman_tools_once(self) -> int:
+        done = 0
+        for key in list(self.leases):
+            slot = self.state.get_slot(key)
+            if slot is None or not getattr(slot, "_approval_futures", None):
+                continue
+            listing = self._http("GET", "/api/chat/slots")
+            info = next((s.get("pending_approval_info") for s in listing if s.get("key") == key and s.get("pending_approval")), None)
+            if not info or info.get("tool") not in FOREMAN_TOOLS:
+                continue  # not ours: leave it for the human
+            self._http(
+                "POST",
+                f"/api/chat/slots/{urllib.parse.quote(key)}/approve",
+                {"action": "approved", "request_id": info.get("request_id", ""), "request_mid": info.get("request_mid", ""), "origin": info.get("origin", "native")},
+            )
+            logger.info("auto-approved %s on %s", info.get("tool"), key)
+            done += 1
+        return done
+
+    async def _approval_loop(self) -> None:
+        while True:
+            await asyncio.sleep(APPROVAL_POLL_SECS)
+            if not self.leases:
+                continue
+            try:
+                self.approved_count += await asyncio.to_thread(self._approve_foreman_tools_once)
+            except Exception:  # noqa: BLE001 - keep polling
+                logger.debug("approval poll failed", exc_info=True)
+
+    # -- reply watching -----------------------------------------------------
+    @staticmethod
+    def _row_text(row: Dict[str, Any]) -> str:
+        return str(row.get("content") or row.get("text") or "")
+
+    def watch_reply(self, key: str, marker: str, callback: Any, timeout: float = 300.0) -> None:
+        """Watch a live slot for the agent's answer to the message containing *marker*.
+
+        When the turn that followed the marker row is done, ``callback(reply_text, error)`` is called
+        in a worker thread. ``reply_text`` is None when the agent produced no answer (``error`` says why).
+        Fire-and-forget; safe to call from a worker thread.
+        """
+        asyncio.run_coroutine_threadsafe(self._watch(key, marker, callback, timeout), self.loop)
+
+    async def _watch(self, key: str, marker: str, callback: Any, timeout: float) -> None:
+        deadline = self.loop.time() + timeout
+        reply: Optional[str] = None
+        error = "timeout"
+        while self.loop.time() < deadline:
+            await asyncio.sleep(2)
+            try:
+                rows = [r for r in self._slot(key).messages if isinstance(r, dict)]
+            except Exception as exc:  # noqa: BLE001
+                error = f"slot unavailable: {exc}"
+                break
+            start = next((i for i, r in enumerate(rows) if marker in self._row_text(r)), None)
+            if start is None:
+                continue
+            tail = rows[start + 1 :]
+            if any(r.get("role") == "done" for r in tail):
+                answer = "\n".join(self._row_text(r) for r in tail if r.get("role") == "assistant").strip()
+                errors = "\n".join(self._row_text(r) for r in tail if r.get("role") == "error").strip()
+                reply, error = (answer or None), (errors or ("" if answer else "empty reply"))
+                break
+        try:
+            await asyncio.to_thread(callback, reply, error)
+        except Exception:  # noqa: BLE001
+            logger.exception("watch_reply callback failed for %s", key)
+
     async def stop(self, key: str) -> None:
         lease = self.leases.pop(key, None)
         if lease is not None and not lease.released:
             await lease.release()
 
     async def release_all(self) -> None:
+        self._approval_future.cancel()
         for key in list(self.leases):
             try:
                 await self.stop(key)
