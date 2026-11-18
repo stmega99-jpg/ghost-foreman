@@ -109,7 +109,7 @@ The Gateway listens on `127.0.0.1` only. To reach it from a phone **without open
 2. In the Tailscale admin console enable **MagicDNS** and **HTTPS Certificates** (DNS page), and enable **Serve** for this node (the CLI prints a link the first time).
 3. Tell the Gateway to accept its own tailnet name (it otherwise answers `403 Host header not allowed`): `kirocrew config set dashboard.tailscale.enabled true`, then `kirocrew restart`. Only this PC's MagicDNS name is added; the access token is still required.
 4. `tailscale serve --bg 5476` publishes `https://<pc-name>.<tailnet>.ts.net/` inside the tailnet. Check with `tailscale serve status` that it says *(tailnet only)* and that Funnel is off.
-5. `scripts\phone-link.ps1` copies (`kirocrew token` also prints the tailnet link on its second line) a sign-in link for the iPhone to the clipboard (it is never printed). The link contains an access token (20 h by default, `-Ttl 2h` for shorter): send it only to your own phone.
+5. `scripts\phone-link.ps1` copies (`kirocrew token` also prints the tailnet link on its second line). With `-Qr` it shows a QR code in a window on the PC instead (`pip install segno`; nothing is written to disk; the window closes by itself) a sign-in link for the iPhone to the clipboard (it is never printed). The link contains an access token (20 h by default, `-Ttl 2h` for shorter): send it only to your own phone.
 
 **iPhone**
 1. Install the Tailscale app and sign in with the same account; keep the VPN switch on.
