@@ -39,6 +39,23 @@ class ForemanStore:
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(managed_slots)").fetchall()}
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS llm_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                model TEXT NOT NULL DEFAULT '',
+                task TEXT NOT NULL DEFAULT '',
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_usd REAL NOT NULL DEFAULT 0.0,
+                cost_basis TEXT NOT NULL DEFAULT '',
+                ok INTEGER NOT NULL DEFAULT 1,
+                note TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
         if "live_key" not in cols:
             # Non-empty live_key marks a slot backed by a real Kiro Crew Gateway slot.
             conn.execute("ALTER TABLE managed_slots ADD COLUMN live_key TEXT NOT NULL DEFAULT ''")

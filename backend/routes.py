@@ -164,6 +164,24 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
     if method == "GET" and rel_path.startswith("/slots/history"):
         slot_id = payload.get("slot_id") or (rel_path.split("?slot_id=", 1)[1] if "?slot_id=" in rel_path else "")
         return 200, adapter.get_slot_history(slot_id, limit=int(payload.get("limit", 50)))
+    if method == "GET" and rel_path == "/usage":
+        return 200, supervisor.llm.usage_summary()
+
+    if method == "POST" and rel_path == "/news/summarize":
+        try:
+            item = supervisor.news.summarize_url(
+                project_id=payload.get("project_id", "proj-foreman"),
+                url=payload["url"],
+                reason=payload.get("reason", ""),
+                category=payload.get("category", "ニュース"),
+            )
+        except Exception as exc:  # fetch / safety / LLM failures are reported, not hidden
+            from .news import UnsafeUrl
+
+            code = "unsafe_url" if isinstance(exc, UnsafeUrl) else "news_failed"
+            return 422, {"error": f"{type(exc).__name__}: {exc}", "code": code}
+        return 200, item
+
     if method == "POST" and rel_path == "/stop":
         res = adapter.stop_control(
             scope=payload.get("scope", "all"),
@@ -176,6 +194,9 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
         mode_state["mode"] = payload.get("mode", mode_state.get("mode", "away"))
         if "quiet_until" in payload:
             mode_state["quiet_until"] = payload["quiet_until"]
+        if "allow_unpublished_to_free_tier" in payload:
+            # Human-owned privacy switch (Spec C): may unpublished project text be sent to the Gemini free tier?
+            mode_state["allow_unpublished_to_free_tier"] = bool(payload["allow_unpublished_to_free_tier"])
         store.set_state("foreman_mode", mode_state)
         return 200, mode_state
 
@@ -209,9 +230,7 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
             except (KeyError, ValueError, TypeError) as exc:
                 # Bad input or an unknown id is the caller's error, not a server fault.
                 return web.json_response({"error": f"{type(exc).__name__}: {exc}", "code": "bad_request"}, status=400)
-            if status == 404:
-                return web.json_response(data, status=404)
-            return web.json_response(data, status=200)
+            return web.json_response(data, status=status)
 
         return _handler
 
@@ -227,6 +246,8 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
         ("POST", "/slots/report"),
         ("POST", "/slots/send"),
         ("GET", "/slots/history"),
+        ("GET", "/usage"),
+        ("POST", "/news/summarize"),
         ("POST", "/stop"),
         ("POST", "/mode"),
         ("POST", "/desktop-lease"),
