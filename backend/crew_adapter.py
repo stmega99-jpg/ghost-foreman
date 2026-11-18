@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .halt import EmergencyStopped, HaltState
 from .store import ForemanStore, _now_iso
 
 
@@ -34,6 +35,7 @@ class CrewAdapter:
         self.store = store
         self.app_name = "ghost-foreman"
         self.live: Optional[Any] = None
+        self.halt = HaltState(store)
 
     @property
     def gateway_mode(self) -> str:
@@ -41,6 +43,14 @@ class CrewAdapter:
 
     def bind_live(self, live: Any) -> None:
         self.live = live
+        live.halt_check = self.is_live_key_halted
+
+    def is_live_key_halted(self, live_key: str) -> bool:
+        with self.store._conn() as conn:
+            row = conn.execute("SELECT id, project_id FROM managed_slots WHERE live_key = ?", (live_key,)).fetchone()
+        if row is None:
+            return bool(self.halt.snapshot()["all"])
+        return self.halt.is_halted(slot_id=row["id"], project_id=row["project_id"])
 
     def reattach_live_slots(self) -> List[str]:
         """After a Gateway restart, re-acquire the real slots recorded in the DB. Returns failures."""
@@ -104,6 +114,7 @@ class CrewAdapter:
         acquired. ``live=False`` (or no Gateway) creates a simulated slot, labelled as such.
         """
         use_live = self.live is not None if live is None else bool(live)
+        self.halt.ensure_running(project_id=project_id)  # no new session while a stop is in force
         if use_live and self.live is None:
             raise RuntimeError("live slot requested but no Gateway is bound")
         with self.store._conn() as conn:
@@ -189,6 +200,7 @@ class CrewAdapter:
         slot = self.get_slot(slot_id)
         if not slot:
             raise ValueError(f"Unknown slot_id: {slot_id}")
+        self.halt.ensure_running(slot)  # nothing is delivered or resumed while an emergency stop is in force
         now = _now_iso()
         delivery = "simulated_not_delivered"
         if slot.get("is_live"):
@@ -229,27 +241,53 @@ class CrewAdapter:
         return self.get_slot(slot_id)  # type: ignore[return-value]
 
     def stop_control(self, scope: str, target_id: str = "") -> Dict[str, Any]:
-        """Stop work by slot, project, or all (Spec B & F emergency stop)."""
+        """Emergency stop (slot / project / all) and the human's explicit resume (resume_all / resume_slot / resume_project).
+
+        A stop first engages a persistent hold (see halt.py), THEN interrupts the real sessions, so nothing can
+        restart in between. The hold stays until a human resumes.
+        """
         now = _now_iso()
+        result: Dict[str, Any] = {"ok": True, "scope": scope, "target_id": target_id, "updated_at": now, "live_stopped": [], "live_errors": []}
+
+        if scope in ("resume_all", "resume_slot", "resume_project"):
+            self.halt.release(scope, target_id)
+            snap = self.halt.snapshot()
+            with self.store._conn() as conn:
+                if scope == "resume_all":
+                    rows = conn.execute("SELECT id, project_id FROM managed_slots WHERE status = 'stopped'").fetchall()
+                elif scope == "resume_slot":
+                    rows = conn.execute("SELECT id, project_id FROM managed_slots WHERE id = ? AND status = 'stopped'", (target_id,)).fetchall()
+                else:
+                    rows = conn.execute("SELECT id, project_id FROM managed_slots WHERE project_id = ? AND status = 'stopped'", (target_id,)).fetchall()
+                for r in rows:
+                    if not self.halt.is_halted(slot_id=r["id"], project_id=r["project_id"]):  # another hold may still apply
+                        conn.execute("UPDATE managed_slots SET status = 'idle', waiting_reason = '人間の許可により停止を解除（自動では作業を再開しません）', updated_at = ? WHERE id = ?", (now, r["id"]))
+            self.halt.audit("resume_permission", scope, target_id, "人間が停止の解除を許可。解除後も、自動回答・自動発注は新しい確認からのみ再開する")
+            result["halt"] = snap
+            return result
+
+        if scope not in ("slot", "project", "all") or (scope != "all" and not target_id):
+            raise ValueError(f"cannot stop scope={scope!r} target={target_id!r}")
+        self.halt.engage(scope, target_id)  # first: from now on nothing may start or continue work
+        self.halt.audit("emergency_stop", scope, target_id, "人間が緊急停止。人間が許可するまで自動発注・自動再開しない")
         with self.store._conn() as conn:
-            if scope == "slot" and target_id:
-                conn.execute(
-                    "UPDATE managed_slots SET status = 'stopped', waiting_reason = '人間による個別停止操作', updated_at = ? WHERE id = ?",
-                    (now, target_id),
-                )
-            elif scope == "project" and target_id:
-                conn.execute(
-                    "UPDATE managed_slots SET status = 'stopped', waiting_reason = '人間によるプロジェクト一括停止', updated_at = ? WHERE project_id = ?",
-                    (now, target_id),
-                )
-            elif scope == "all":
-                conn.execute(
-                    "UPDATE managed_slots SET status = 'stopped', waiting_reason = '人間による全エージェント緊急停止', updated_at = ?",
-                    (now,),
-                )
-            elif scope == "resume_all":
-                conn.execute(
-                    "UPDATE managed_slots SET status = 'working', waiting_reason = '', updated_at = ? WHERE status = 'stopped'",
-                    (now,),
-                )
-        return {"ok": True, "scope": scope, "target_id": target_id, "updated_at": now}
+            if scope == "slot":
+                conn.execute("UPDATE managed_slots SET status = 'stopped', waiting_reason = '人間による個別停止（再開は人間の許可が必要）', updated_at = ? WHERE id = ?", (now, target_id))
+                rows = conn.execute("SELECT id, live_key FROM managed_slots WHERE id = ? AND live_key != ''", (target_id,)).fetchall()
+            elif scope == "project":
+                conn.execute("UPDATE managed_slots SET status = 'stopped', waiting_reason = '人間によるプロジェクト一括停止（再開は人間の許可が必要）', updated_at = ? WHERE project_id = ?", (now, target_id))
+                rows = conn.execute("SELECT id, live_key FROM managed_slots WHERE project_id = ? AND live_key != ''", (target_id,)).fetchall()
+            else:
+                conn.execute("UPDATE managed_slots SET status = 'stopped', waiting_reason = '人間による全エージェント緊急停止（再開は人間の許可が必要）', updated_at = ?", (now,))
+                rows = conn.execute("SELECT id, live_key FROM managed_slots WHERE live_key != ''").fetchall()
+        if self.live is not None:
+            # Also interrupt the REAL sessions (the DB status alone would not stop a running agent).
+            for r in rows:
+                try:
+                    result["queue_cancelled"] = result.get("queue_cancelled", 0) + (self.live.stop_slot(r["live_key"]) or 0)
+                    result["live_stopped"].append(r["id"])
+                except Exception as exc:  # noqa: BLE001
+                    result["live_errors"].append(f"{r['id']}: {exc}")
+            result["ok"] = not result["live_errors"]
+        result["halt"] = self.halt.snapshot()
+        return result

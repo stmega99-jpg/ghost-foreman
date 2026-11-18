@@ -98,3 +98,21 @@ Ghost Foreman can use the official Gemini API for low-cost work (news summaries,
 - `GET /api/apps/ghost-foreman/usage` shows calls and measured tokens per provider. Kiro session usage is not exposed by the host and is shown as unknown.
 
 Tests for the failure paths (quota exhaustion, overloaded model, rejected key, SSRF guard) use an injected transport: `python -m unittest discover -s tests -v`.
+
+
+## Remote access from an iPhone (Tailscale Serve)
+
+The Gateway listens on `127.0.0.1` only. To reach it from a phone **without opening a port to the internet**, publish it inside your private tailnet with Tailscale Serve (not Funnel). Only devices signed in to your Tailscale account can connect, and the dashboard still requires its access token.
+
+**PC (one time)**
+1. Install Tailscale and sign in: `winget install --id Tailscale.Tailscale -e`.
+2. In the Tailscale admin console enable **MagicDNS** and **HTTPS Certificates** (DNS page), and enable **Serve** for this node (the CLI prints a link the first time).
+3. `tailscale serve --bg 5476` publishes `https://<pc-name>.<tailnet>.ts.net/` inside the tailnet. Check with `tailscale serve status` that it says *(tailnet only)* and that Funnel is off.
+4. `scripts\phone-link.ps1` copies a sign-in link for the iPhone to the clipboard (it is never printed). The link contains an access token (20 h by default, `-Ttl 2h` for shorter): send it only to your own phone.
+
+**iPhone**
+1. Install the Tailscale app and sign in with the same account; keep the VPN switch on.
+2. Open the link in Safari, then Share → **Add to Home Screen**.
+3. Open Ghost Foreman from the Home Screen icon (the installed web app), go to Kiro Crew *Settings → Notifications* and allow notifications. iOS only allows this from the installed web app, over HTTPS.
+
+Notes: push subscriptions belong to the address they were created on, so subscribe again after switching to the `ts.net` address. `tailscale serve reset` removes the publication. Never run `tailscale funnel` for this app.

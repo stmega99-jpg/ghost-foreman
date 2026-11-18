@@ -56,6 +56,7 @@ class MeetingEngine:
 
     # ------------------------------------------------------------------ public
     def start(self, project_id: str, topic: str, perspectives: Optional[List[str]] = None) -> Dict[str, Any]:
+        self.adapter.halt.ensure_running(project_id=project_id)  # no meeting while a stop is in force
         labels = [p for p in (perspectives or DEFAULT_PERSPECTIVES) if isinstance(p, str) and p.strip()][:MAX_PARTICIPANTS]
         if len(labels) < 2:
             raise ValueError("a meeting needs at least 2 participants")

@@ -64,6 +64,7 @@ async def on_startup(ctx: Any = None) -> None:
             sup = get_runtime()[2]
             sup.recover_probes()
             sup.meetings.recover_interrupted()
+            sup.notifier.start()
         mode_state = store.get_state("foreman_mode", {})
         mode_state["gateway_mode"] = adapter.gateway_mode
         store.set_state("foreman_mode", mode_state)
@@ -74,6 +75,8 @@ async def on_startup(ctx: Any = None) -> None:
 async def on_shutdown(ctx: Any = None) -> None:
     """Invoked asynchronously by Kiro Crew Gateway when Ghost Foreman is disabled or stopped."""
     global _LIVE
+    if _SUPERVISOR is not None:
+        _SUPERVISOR.notifier.stop()
     if _LIVE is not None:
         await _LIVE.release_all()
         _LIVE = None

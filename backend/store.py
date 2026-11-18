@@ -73,6 +73,14 @@ class ForemanStore:
                 DROP TABLE llm_usage_old;
                 """
             )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notifications_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, question_id TEXT NOT NULL, kind TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', delivery TEXT NOT NULL, detail TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
         if "live_key" not in cols:
             # Non-empty live_key marks a slot backed by a real Kiro Crew Gateway slot.
             conn.execute("ALTER TABLE managed_slots ADD COLUMN live_key TEXT NOT NULL DEFAULT ''")

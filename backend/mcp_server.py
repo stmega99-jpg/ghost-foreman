@@ -93,7 +93,7 @@ class GatewayClient:
         return path.read_text(encoding="utf-8").strip()
 
     def _auth(self, force: bool = False) -> str:
-        if self._token and not force and time.time() - self._token_ts < 600:
+        if self._token and not force and time.time() - self._token_ts < 240:  # app tokens expire after 300s
             return self._token
         req = urllib.request.Request(
             f"{self.base}/api/apps/{APP_NAME}/token",
