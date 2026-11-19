@@ -253,8 +253,9 @@ class MeetingEngine:
 
     def _ask_gemini(self, meeting_id: str, project_id: str, tag: str, prompt: str, out: Dict[str, Any], done: threading.Event) -> None:
         """One Gemini free-tier call for a participant. Gemini only: if it cannot answer, the participant has no answer
-        (no other AI answers in its place). An HTTP request cannot be cancelled, so a stop is checked right before the
-        request and its answer is thrown away if a stop landed while it was in flight."""
+        (no other AI answers in its place). An HTTP request cannot be cancelled, so a stop is checked before every
+        request to the API (no retry on another model after a stop) and an answer that arrives after a stop is
+        thrown away."""
         try:
             if self.gemini is None:
                 raise RuntimeError("Gemini が設定されていません")
@@ -262,8 +263,11 @@ class MeetingEngine:
                 raise RuntimeError(GEMINI_CONSENT_REQUIRED)
             if self.adapter.halt.is_halted(project_id=project_id):
                 raise RuntimeError("緊急停止中のため送信しません")
+            # Checked again before EVERY request Gemini sends (model list, each model it tries), so after a stop it
+            # does not retry the same text on another model.
             res = self.gemini.gemini_only(f"meeting:{tag}", prompt, unpublished_allowed=True, system=GEMINI_SYSTEM,
-                                          max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS)
+                                          max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+                                          should_stop=lambda: self.adapter.halt.is_halted(project_id=project_id))
             if self.adapter.halt.is_halted(project_id=project_id):
                 raise RuntimeError("緊急停止されたため、届いた回答は使いません")
             out.update(reply=res.text, error="", ran_on="gemini", model=res.model)

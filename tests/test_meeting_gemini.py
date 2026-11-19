@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 
 from backend import meeting as meeting_mod  # noqa: E402
-from backend.gemini import GeminiQuotaExhausted, GeminiResult  # noqa: E402
+from backend.gemini import GeminiClient, GeminiQuotaExhausted, GeminiResult, GeminiStopped  # noqa: E402
 from backend.llm_router import GEMINI_ID, LlmRouter, LlmUnavailable  # noqa: E402
 from backend.meeting import GEMINI_CONSENT_REQUIRED, MeetingEngine  # noqa: E402
 from test_meeting import answer_for, make, wait  # noqa: E402
@@ -33,7 +33,9 @@ class FakeGemini:
     def has_key(self):
         return self.key
 
-    def generate(self, prompt, system="", json_mode=False, max_output_tokens=1024):
+    def generate(self, prompt, system="", json_mode=False, max_output_tokens=1024, should_stop=None):
+        if should_stop is not None and should_stop():
+            raise GeminiStopped("緊急停止中のため Gemini API に送信しませんでした")
         self.prompts.append(prompt)
         self.systems.append(system)
         self.max_tokens.append(max_output_tokens)
@@ -201,6 +203,67 @@ class EmergencyStop(unittest.TestCase):
         engine._ask_gemini("mtg-y", "proj-foreman", "r1", "x", out, done)
         self.assertIn("緊急停止中", out["error"])
         self.assertEqual(fake.prompts, [])
+
+
+MODELS = {"models": [{"name": f"models/{n}", "supportedGenerationMethods": ["generateContent"]}
+                     for n in ("gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash")]}
+
+
+class Transport:
+    """The HTTP layer under the REAL GeminiClient. Every model answers 503 (busy), so the client moves on to the next
+    model, unless *on_post* (run while the first request is "in flight") stops it."""
+
+    def __init__(self, on_post=None):
+        self.requests, self.on_post = [], on_post
+
+    def __call__(self, method, url, headers, body, timeout):
+        self.requests.append((method, url.rsplit("/", 1)[-1]))
+        if method == "GET":
+            return 200, MODELS
+        if self.on_post is not None and len([r for r in self.requests if r[0] == "POST"]) == 1:
+            self.on_post()
+        return 503, {"error": {"message": "overloaded"}}
+
+    def posts(self):
+        return [u for m, u in self.requests if m == "POST"]
+
+
+class NoRetryOnAnotherModelAfterAStop(unittest.TestCase):
+    def test_without_a_stop_check_the_client_does_try_the_next_models(self):
+        # Shows what the check prevents: on 503 the client sends the same text to the next model.
+        t = Transport()
+        with self.assertRaises(Exception):
+            GeminiClient(key_loader=lambda: "k", transport=t).generate("x")
+        self.assertEqual(len(t.posts()), 3)
+
+    def test_a_stop_during_the_first_request_means_no_other_model_is_asked(self):
+        stopped = {"v": False}
+        t = Transport(on_post=lambda: stopped.update(v=True))
+        with self.assertRaises(GeminiStopped):
+            GeminiClient(key_loader=lambda: "k", transport=t).generate("x", should_stop=lambda: stopped["v"])
+        self.assertEqual(t.posts(), ["gemini-2.5-flash-lite:generateContent"], "only the request already in flight")
+
+    def test_nothing_is_sent_when_stopped_before_the_first_request(self):
+        t = Transport()
+        with self.assertRaises(GeminiStopped):
+            GeminiClient(key_loader=lambda: "k", transport=t).generate("x", should_stop=lambda: True)
+        self.assertEqual(t.requests, [], "not even the model list")
+
+    def test_in_a_meeting_a_stop_while_gemini_answers_ends_all_requests(self):
+        holder = {}
+        t = Transport(on_post=lambda: holder["adapter"].stop_control("all"))
+        client = GeminiClient(key_loader=lambda: "k", transport=t)
+        store, adapter, live, ext, _fake, router, engine = setup()
+        router.gemini = client
+        holder["adapter"] = adapter
+        m = wait(engine, engine.start("proj-foreman", "議題", WITH_GEMINI, synthesizer_harness="kiro", allow_unpublished_to_gemini=True)["id"])
+        self.assertEqual(m["status"], "failed")
+        self.assertIn("緊急停止", m["summary"]["note"])
+        self.assertEqual(len(t.posts()), 1, "after the stop no other model received the meeting's text")
+        self.assertEqual(store.get_state("gemini_cooldown_until", 0.0) or 0.0, 0.0, "a stop is not a quota problem")
+        with store._conn() as c:
+            status = c.execute("SELECT status FROM provider_budgets WHERE provider_id = ?", (GEMINI_ID,)).fetchone()
+        self.assertNotEqual(status and status["status"], "key_rejected", "a stop does not mark the key as rejected")
 
 
 class Route(unittest.TestCase):

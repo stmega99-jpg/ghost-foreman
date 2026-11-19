@@ -22,6 +22,7 @@ from .gemini import (
     GeminiClient,
     GeminiNoKey,
     GeminiQuotaExhausted,
+    GeminiStopped,
     GeminiUnavailable,
 )
 from .store import ForemanStore, _now_iso
@@ -105,14 +106,19 @@ class LlmRouter:
             return {"available": False, "reason": "Gemini 無料枠の、設定した1日の上限に達しています"}
         return {"available": True, "reason": ""}
 
-    def _try_gemini(self, task: str, prompt: str, system: str, json_mode: bool, max_output_tokens: int, notes: List[str]) -> Optional[LlmResult]:
-        """One Gemini free-tier attempt. Returns the result, or None with the reason appended to *notes*."""
+    def _try_gemini(self, task: str, prompt: str, system: str, json_mode: bool, max_output_tokens: int, notes: List[str],
+                    should_stop: Optional[Callable[[], bool]] = None) -> Optional[LlmResult]:
+        """One Gemini free-tier attempt. Returns the result, or None with the reason appended to *notes*.
+        *should_stop* is checked before every API request (see GeminiClient._call)."""
         st = self.gemini_status()
         if not st["available"]:
             notes.append("Gemini: " + st["reason"])
             return None
         try:
-            res = self.gemini.generate(prompt, system=system, json_mode=json_mode, max_output_tokens=max_output_tokens)
+            kwargs: Dict[str, Any] = {"system": system, "json_mode": json_mode, "max_output_tokens": max_output_tokens}
+            if should_stop is not None:
+                kwargs["should_stop"] = should_stop
+            res = self.gemini.generate(prompt, **kwargs)
             self._bump_quota(GEMINI_ID)
             self._set_status(GEMINI_ID, "available")
             self._record(GEMINI_ID, res.model, task, res.input_tokens, res.output_tokens, True, "ok", "free tier (token counts measured)")
@@ -127,13 +133,17 @@ class LlmRouter:
             self._set_status(GEMINI_ID, "key_rejected")
             self._record(GEMINI_ID, "", task, 0, 0, False, str(exc), "free tier")
             notes.append(f"Gemini: {exc}")
+        except GeminiStopped as exc:
+            # A stop, not a provider problem: no cooldown, and the key is not marked as rejected.
+            self._record(GEMINI_ID, "", task, 0, 0, False, "emergency stop: no further request sent", "free tier")
+            notes.append(str(exc))
         except GeminiUnavailable as exc:
             self._record(GEMINI_ID, "", task, 0, 0, False, str(exc), "free tier")
             notes.append(f"Gemini一時利用不可: {exc}")
         return None
 
     def gemini_only(self, task: str, prompt: str, *, unpublished_allowed: bool, system: str = "", json_mode: bool = False,
-                    max_output_tokens: int = 1024) -> LlmResult:
+                    max_output_tokens: int = 1024, should_stop: Optional[Callable[[], bool]] = None) -> LlmResult:
         """Gemini free tier and NOTHING else: no Kiro fallback, no paid API. For a meeting participant named "Gemini".
 
         *unpublished_allowed* is the caller's own, explicit permission for THIS text (an AI meeting asks the human per
@@ -143,7 +153,7 @@ class LlmRouter:
         if unpublished_allowed is not True:
             raise LlmUnavailable("未公開の制作情報を Gemini 無料枠に送る許可がありません")
         notes: List[str] = []
-        res = self._try_gemini(task, prompt, system, json_mode, max_output_tokens, notes)
+        res = self._try_gemini(task, prompt, system, json_mode, max_output_tokens, notes, should_stop=should_stop)
         if res is None:
             raise LlmUnavailable("; ".join(notes) or "Gemini が回答できませんでした")
         return res
