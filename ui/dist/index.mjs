@@ -247,9 +247,10 @@ function Consult({ d, call }) {
   const [topic, setTopic] = useState("");
   const [harnesses, setHarnesses] = useState({ harnesses: [] });
   const [limits, setLimits] = useState({ min: 2, max: 5 });
-  const [picked, setPicked] = useState([]);
-  const [advanced, setAdvanced] = useState(false);
+  // ONE list of participants (a point of view and an AI each). The ticks below are drawn from it and the detailed
+  // panel edits it, so closing the panel never throws away what was changed there.
   const [parts, setParts] = useState([]);
+  const [advanced, setAdvanced] = useState(false); // only whether the editor is shown
   const [organiser, setOrganiser] = useState("kiro");
   const [geminiOk, setGeminiOk] = useState(false); // the human's answer for THIS meeting; reset after each start
   const [showFailed, setShowFailed] = useState(false);
@@ -262,7 +263,7 @@ function Consult({ d, call }) {
     if (first && !seeded.current) {
       seeded.current = true;
       // Recommended: every AI that can run now, except Gemini (it needs a permission for each meeting).
-      setPicked((r.harnesses || []).filter((x) => x.available && x.id !== "gemini").map((x) => x.id));
+      setParts((r.harnesses || []).filter((x) => x.available && x.id !== "gemini").map((x, i) => ({ perspective: PERSPECTIVES[i % PERSPECTIVES.length], harness: x.id })));
     }
   };
   const loadHarnesses = (refresh) => call("GET", "/meetings/harnesses" + (refresh ? "?refresh=1" : "")).then((r) => apply(r, false)).catch(() => {});
@@ -270,7 +271,9 @@ function Consult({ d, call }) {
 
   const rows = harnesses.harnesses || [];
   const rowOf = (id) => rows.find((x) => x.id === id) || {};
-  const effective = advanced ? parts.filter((p) => p.perspective.trim()) : picked.map((id, i) => ({ perspective: PERSPECTIVES[i % PERSPECTIVES.length], harness: id }));
+  // A blank point of view gets the default for its place, so a participant is never silently dropped.
+  const effective = parts.map((p, i) => ({ perspective: p.perspective.trim() || PERSPECTIVES[i % PERSPECTIVES.length], harness: p.harness }));
+  const countOf = (id) => parts.filter((p) => p.harness === id).length;
   const chosenIds = [...effective.map((p) => p.harness), organiser];
   const outside = chosenIds.some((id) => ["external_cli", "gemini_api"].includes(rowOf(id).runtime));
   const usesGemini = chosenIds.includes("gemini");
@@ -278,11 +281,9 @@ function Consult({ d, call }) {
   const blocked = chosenIds.filter((id) => rows.length && !rowOf(id).available);
   const agentOptions = (rows.length ? rows : [{ id: "kiro", label: "Kiro", runtime: "kiro_crew", available: true }]).map((x) =>
     h("option", { key: x.id, value: x.id, disabled: !x.available }, x.label + (WHERE[x.runtime] || "") + (x.available ? "" : "　— 使えません")));
-  const togglePick = (id) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
-  const openAdvanced = () => {
-    if (!advanced) setParts(picked.map((id, i) => ({ perspective: PERSPECTIVES[i % PERSPECTIVES.length], harness: id })));
-    setAdvanced(!advanced);
-  };
+  const nextPerspective = () => PERSPECTIVES.find((v) => !parts.some((p) => p.perspective.trim() === v)) || PERSPECTIVES[parts.length % PERSPECTIVES.length];
+  // Ticking adds one participant; unticking removes the participants of that AI. Everyone else keeps their edits.
+  const togglePick = (id) => setParts(countOf(id) ? parts.filter((p) => p.harness !== id) : [...parts, { perspective: nextPerspective(), harness: id }]);
   const setPart = (i, key, value) => setParts(parts.map((p, j) => (j === i ? { ...p, [key]: value } : p)));
 
   let why = "";
@@ -312,9 +313,10 @@ function Consult({ d, call }) {
     h("div", { style: S.card },
       h("h3", { style: S.h3 }, "② 誰に相談しますか？（2つ以上選んでください）"),
       ...rows.map((x) => h("label", { key: x.id, style: { display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0", borderTop: `1px solid ${C.border}`, opacity: x.available ? 1 : 0.6 } },
-        h("input", { type: "checkbox", style: { width: 22, height: 22, marginTop: 2 }, checked: picked.includes(x.id), disabled: !x.available || advanced, onChange: () => togglePick(x.id), "aria-label": `${x.label}に相談する` }),
+        h("input", { type: "checkbox", style: { width: 22, height: 22, marginTop: 2 }, checked: countOf(x.id) > 0, disabled: !x.available || (countOf(x.id) === 0 && parts.length >= limits.max), onChange: () => togglePick(x.id), "aria-label": `${x.label}に相談する` }),
         h("span", { style: { flex: 1 } },
           h("strong", null, x.label), " ", h(Badge, { text: x.available ? "使えます" : "いまは使えません", color: x.available ? C.ok : C.bad }),
+          countOf(x.id) > 1 ? h(Badge, { text: `${countOf(x.id)}人参加` }) : null,
           h("div", { style: S.mute }, AI_DESC[x.id] || ""),
           !x.available && x.reason ? h("div", { style: { color: C.warn, fontSize: 13 } }, x.reason) : null))),
       h("div", { style: { ...S.row, marginTop: 6 } },
@@ -330,7 +332,7 @@ function Consult({ d, call }) {
         h("div", { style: S.mute }, geminiRow.consent_note || "議題・各AIの案など、未公開の制作情報を含みます。無料枠に送った内容は、Google がサービス改善に使う場合があります。"),
         geminiOk ? null : h("div", { style: { color: C.warn, fontSize: 13 } }, "許可しない場合は、Gemini を外してください。")) : null),
     h("div", { style: S.card },
-      h("button", { style: S.btn, onClick: openAdvanced }, advanced ? "▲ くわしい設定を閉じる" : "▼ くわしく設定する（任意）"),
+      h("button", { style: S.btn, onClick: () => setAdvanced(!advanced) }, advanced ? "▲ くわしい設定を閉じる" : "▼ くわしく設定する（任意）"),
       advanced ? h("div", { style: { marginTop: 8 } },
         h("div", { style: S.mute }, "参加者ごとに、どの視点で意見を出すか・どのAIにするかを決められます。同じAIを何人か入れることもできます。"),
         ...parts.map((p, i) => h("div", { key: i, style: { ...S.row, marginTop: 6 } },

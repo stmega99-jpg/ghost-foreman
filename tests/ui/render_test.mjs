@@ -201,6 +201,43 @@ await settle(20);
 const adv = calls.find((c) => c[0] === "POST" && c[1].endsWith("/meetings"));
 expect("the detailed settings are what is sent", !!adv && adv[2].allow_unpublished_to_gemini === true && adv[2].participants[1].harness === "gemini" && adv[2].participants[0].perspective.length > 0);
 
+// closing the detailed settings keeps what was changed there (participants, points of view, organiser)
+await consultScreen("keep", noHalt);
+await setValue(topicInput(), "設定を残す議題", dom.window.HTMLInputElement.prototype, "input");
+await clickText("くわしく設定する");
+const viewpoint = (i) => document.querySelector(`input[aria-label='参加者${String.fromCharCode(65 + i)}の視点']`);
+const aiOf = (i) => document.querySelector(`select[aria-label='参加者${String.fromCharCode(65 + i)}のAI']`);
+await setValue(viewpoint(1), "私が書いた視点", dom.window.HTMLInputElement.prototype, "input");
+await clickText("＋ 参加者を追加");
+await setValue(viewpoint(2), "三人目の視点", dom.window.HTMLInputElement.prototype, "input");
+await setValue(aiOf(2), "kiro", dom.window.HTMLSelectElement.prototype, "change");
+await setValue(document.querySelector("select[aria-label='まとめ役のAI']"), "claude", dom.window.HTMLSelectElement.prototype, "change");
+await clickText("くわしい設定を閉じる");
+expect("the detailed panel is closed", !viewpoint(0));
+expect("the ticks show the edited participants (Kiro twice, Claude Code once)", box("Kiroに相談する").checked && box("Claude Codeに相談する").checked && text().includes("2人参加"));
+await clickText("くわしく設定する");
+expect("reopening shows the same edits", viewpoint(1).value === "私が書いた視点" && viewpoint(2).value === "三人目の視点" && aiOf(2).value === "kiro" && document.querySelector("select[aria-label='まとめ役のAI']").value === "claude");
+await clickText("くわしい設定を閉じる");
+calls.length = 0;
+await click(startButton());
+await settle(20);
+const kept = calls.find((c) => c[0] === "POST" && c[1].endsWith("/meetings"));
+expect("what is sent is what was edited, after the panel was closed", !!kept && kept[2].participants.length === 3 && kept[2].participants[1].perspective === "私が書いた視点" && kept[2].participants[2].perspective === "三人目の視点" && kept[2].participants[2].harness === "kiro" && kept[2].synthesizer_harness === "claude");
+// ticking another AI adds one participant and leaves the edited ones alone; unticking removes only that AI
+await setValue(topicInput(), "続きの議題", dom.window.HTMLInputElement.prototype, "input");
+await click(box("Geminiに相談する"));
+await click(box("Geminiに相談する"));
+await clickText("くわしく設定する");
+expect("ticking and unticking an AI does not touch the other participants' edits", viewpoint(1).value === "私が書いた視点" && viewpoint(2).value === "三人目の視点" && !viewpoint(3));
+// a blank point of view is filled in, not dropped
+await setValue(viewpoint(1), "", dom.window.HTMLInputElement.prototype, "input");
+await clickText("くわしい設定を閉じる");
+calls.length = 0;
+await click(startButton());
+await settle(20);
+const blank = calls.find((c) => c[0] === "POST" && c[1].endsWith("/meetings"));
+expect("a participant with a blank point of view is kept, with a default one", !!blank && blank[2].participants.length === 3 && blank[2].participants[1].perspective.length > 0);
+
 // the minutes
 const minutes = clone(noHalt);
 const person = { speaker: "参加者A（x／Gemini）", label: "Gemini", harness: "gemini", runtime: "gemini_api", runtime_label: "Kiro Crew 外で実行（Gemini API 無料枠）", ran_on: "gemini", model: "gemini-2.5-flash-lite", verified: true };
