@@ -89,6 +89,7 @@ await delCookie("mc_token_5476", "/");
 await delCookie("mc_refresh_5476", "/api/auth");
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
 await waitText("サインインしてください");
+await page.waitForSelector('input[type="url"]', { timeout: 20000 });
 const before = page.url();
 await page.type('input[type="url"]', "https://evil.example/phish");
 await page.click("button");
@@ -99,6 +100,7 @@ expect("7. a pasted address without a token is refused, no navigation", page.url
 await page.evaluate(() => localStorage.setItem("gf-lang", "en"));
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
 expect("8. English: the sign-in screen is shown in English", await waitText("Please sign in"));
+await page.waitForSelector('input[type="url"]', { timeout: 20000 });
 await page.type('input[type="url"]', "https://evil.example/phish");
 await page.click("button");
 await new Promise((r) => setTimeout(r, 800));

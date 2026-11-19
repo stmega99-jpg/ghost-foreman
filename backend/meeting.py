@@ -402,7 +402,11 @@ class MeetingEngine:
             # Round 0: every AI must actually answer before the meeting starts, so an AI that is not signed in, is out of
             # memory or tries to use a tool is reported up front instead of failing silently mid-way.
             names = speakers + [f"幽霊（整理役／{harness_label(organiser)}）"]
-            check = "AI会議の参加確認です。" + _NO_TOOLS + "あなたが何のAIか（製品名）を1行で書き、最後に「準備OK」と書いてください。"
+            if self._language.get(meeting_id) == "en":
+                check = ("This is the participation check for an AI meeting. Do not run tools or touch files; answer from your own thinking. "
+                         "Write which AI you are (the product name) in one line, and end with the word \"Ready\".")
+            else:
+                check = "AI会議の参加確認です。" + _NO_TOOLS + "あなたが何のAIか（製品名）を1行で書き、最後に「準備OK」と書いてください。"
             pre = self._ask_all(meeting_id, project_id, "pre", [(w, check) for w in who], timeout=PREFLIGHT_TIMEOUT_SECS)
             self._record_who(meeting_id, pre)
             entries, problems = [], []

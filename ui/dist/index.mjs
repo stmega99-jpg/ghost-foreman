@@ -343,7 +343,7 @@ const EN_FRAG = [
     .replace(/幽霊（整理役／([^（）]*)）/g, "Ghost (organiser / $1)");
   for (const [ja, en] of EN_FRAG) out = out.split(ja).join(en);
   return out
-    .replace(/［([^］]*)］/g, (all, inner) => `[${inner.replace(/^Kiro Crew 外で実行/, "Outside Kiro Crew").replace(/^Kiro Crew で実行/, "Inside Kiro Crew").replace("Gemini API 無料枠", "Gemini API free tier")}]`)
+    .replace(/［([^］]*)］/g, (all, inner) => `[${inner.replace(/^Kiro Crew 外で実行（Gemini API 無料枠）/, "Outside Kiro Crew (Gemini API free tier)").replace(/^Kiro Crew 外で実行/, "Outside Kiro Crew").replace(/^Kiro Crew で実行/, "Inside Kiro Crew").replace("Gemini API 無料枠", "Gemini API free tier")}]`)
     .replace(/（参加できません: ([^）]*)）/g, "(cannot take part: $1)");
 }
 const shortName = (s) => (LANG === "en" ? tb(s).split(" (")[0] : String(s).split("（")[0]);
