@@ -46,6 +46,9 @@ class FakeLive:
     def stop_slot(self, key):
         self.stopped.append(key)
 
+    def cancel_runs(self, project_id=None):
+        return []
+
     def watch_reply(self, key, marker, cb, timeout=0):
         self.watched.append((key, marker))
 
@@ -139,6 +142,29 @@ class StopThenNothingRestarts(unittest.TestCase):
         adapter.stop_control("slot", a)
         self.assertTrue(live.halt_check(key))
         self.assertFalse(live.halt_check(adapter.get_slot(b)["live_key"]))
+
+
+class SlotAlreadyGone(unittest.TestCase):
+    def test_a_slot_removed_during_the_stop_is_not_reported_as_a_failure(self):
+        import urllib.error
+
+        store, adapter, live, sup, a, b = make()
+        gone = adapter.get_slot(a)["live_key"]
+        real_stop = live.stop_slot
+
+        def stop_slot(key):
+            if key == gone:
+                raise urllib.error.HTTPError(key, 404, "Not Found", {}, None)
+            if key.startswith("gf-proj-other"):
+                raise urllib.error.HTTPError(key, 500, "Server Error", {}, None)
+            return real_stop(key)
+
+        live.stop_slot = stop_slot
+        res = adapter.stop_control("all")
+        self.assertEqual(res["already_gone"], [a])
+        self.assertEqual(len(res["live_errors"]), 1, "other HTTP errors are still failures")
+        self.assertFalse(res["ok"])
+        self.assertTrue(res["halt"]["active"])
 
 
 class Scope(unittest.TestCase):

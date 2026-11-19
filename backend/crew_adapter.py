@@ -16,6 +16,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +37,8 @@ class CrewAdapter:
         self.app_name = "ghost-foreman"
         self.live: Optional[Any] = None
         self.halt = HaltState(store)
+        # Called on every emergency stop as cb(scope, target_id): e.g. kill AI-meeting CLIs running outside Kiro Crew.
+        self.stop_callbacks: List[Any] = []
 
     @property
     def gateway_mode(self) -> str:
@@ -58,10 +61,10 @@ class CrewAdapter:
         if self.live is None:
             return failed
         with self.store._conn() as conn:
-            rows = conn.execute("SELECT id, project_id, live_key FROM managed_slots WHERE live_key != ''").fetchall()
+            rows = conn.execute("SELECT id, project_id, live_key, agent FROM managed_slots WHERE live_key != ''").fetchall()
         for r in rows:
             try:
-                self.live.call(self.live.acquire(r["live_key"], r["project_id"]))
+                self.live.call(self.live.acquire(r["live_key"], r["project_id"], agent=r["agent"]))
             except Exception as exc:  # noqa: BLE001
                 failed.append(f"{r['id']}: {exc}")
         return failed
@@ -107,6 +110,7 @@ class CrewAdapter:
         worktree_branch: str = "",
         live: Optional[bool] = None,
         send_intro: bool = True,
+        agent: str = "",
     ) -> Dict[str, Any]:
         """Create a Ghost Foreman managed slot.
 
@@ -123,8 +127,10 @@ class CrewAdapter:
             slot_id = f"slot-{(max(nums) if nums else 0) + 1:02d}"
         live_key = ""
         if use_live:
-            key = f"gf-{project_id}-{slot_id}"
-            self.live.call(self.live.acquire(key, project_id, agent=""))
+            # Slot ids are reused once a slot is deleted, so the Gateway key gets a random
+            # suffix: a new slot must never resume a deleted slot's session or transcript.
+            key = f"gf-{project_id}-{slot_id}-{uuid.uuid4().hex[:8]}"
+            self.live.call(self.live.acquire(key, project_id, agent=agent))
             live_key = key
         branch = worktree_branch or f"feat/{project_id}-{slot_id}"
         now = _now_iso()
@@ -140,11 +146,11 @@ class CrewAdapter:
                 """
                 INSERT INTO managed_slots
                 (id, project_id, name, backend, role, ownership, status, current_task, waiting_reason,
-                 next_task, worktree_branch, history_json, context_json, updated_at, live_key)
-                VALUES (?, ?, ?, ?, ?, 'managed', 'working', ?, '', ?, ?, ?, '[]', ?, ?)
+                 next_task, worktree_branch, history_json, context_json, updated_at, live_key, agent)
+                VALUES (?, ?, ?, ?, ?, 'managed', 'working', ?, '', ?, ?, ?, '[]', ?, ?, ?)
                 """,
                 (slot_id, project_id, name, backend, role, current_task, next_task, branch,
-                 json.dumps(initial_history, ensure_ascii=False), now, live_key),
+                 json.dumps(initial_history, ensure_ascii=False), now, live_key, agent if live_key else ""),
             )
         if live_key and send_intro:
             intro = (
@@ -280,12 +286,24 @@ class CrewAdapter:
             else:
                 conn.execute("UPDATE managed_slots SET status = 'stopped', waiting_reason = '人間による全エージェント緊急停止（再開は人間の許可が必要）', updated_at = ?", (now,))
                 rows = conn.execute("SELECT id, live_key FROM managed_slots WHERE live_key != ''").fetchall()
+        for cb in list(self.stop_callbacks):
+            try:
+                result.setdefault("stopped_outside_kiro_crew", []).extend(cb(scope, target_id) or [])
+            except Exception as exc:  # noqa: BLE001
+                result["live_errors"].append(f"stop hook: {exc}")
         if self.live is not None:
             # Also interrupt the REAL sessions (the DB status alone would not stop a running agent).
             for r in rows:
                 try:
                     result["queue_cancelled"] = result.get("queue_cancelled", 0) + (self.live.stop_slot(r["live_key"]) or 0)
                     result["live_stopped"].append(r["id"])
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 404:
+                        # The Gateway slot is already gone (e.g. a meeting removed its own slot
+                        # while this stop ran): nothing is left running there, so it is not a failure.
+                        result.setdefault("already_gone", []).append(r["id"])
+                    else:
+                        result["live_errors"].append(f"{r['id']}: {exc}")
                 except Exception as exc:  # noqa: BLE001
                     result["live_errors"].append(f"{r['id']}: {exc}")
             result["ok"] = not result["live_errors"]

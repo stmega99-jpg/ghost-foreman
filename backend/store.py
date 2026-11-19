@@ -81,6 +81,9 @@ class ForemanStore:
             )
             """
         )
+        if "agent" not in cols:
+            # Kiro Crew agent (and so harness: Claude Code / Codex / Kiro) a live slot was started with; "" = default.
+            conn.execute("ALTER TABLE managed_slots ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
         if "live_key" not in cols:
             # Non-empty live_key marks a slot backed by a real Kiro Crew Gateway slot.
             conn.execute("ALTER TABLE managed_slots ADD COLUMN live_key TEXT NOT NULL DEFAULT ''")

@@ -138,8 +138,37 @@ function Slots({ d, call }) {
 }
 
 // ------------------------------------------------------------------ meetings
+const DEFAULT_PARTICIPANTS = [
+  { perspective: "設計・世界観との整合性の視点", harness: "kiro" },
+  { perspective: "実装工数・リスクの視点", harness: "kiro" },
+  { perspective: "プレイヤー体験・面白さの視点", harness: "kiro" },
+];
+
 function Meetings({ d, call }) {
   const [topic, setTopic] = useState("");
+  const [parts, setParts] = useState(DEFAULT_PARTICIPANTS);
+  const [organiser, setOrganiser] = useState("kiro");
+  const [harnesses, setHarnesses] = useState({ harnesses: [] });
+  const [limits, setLimits] = useState({ min: 2, max: 5 });
+  const loadHarnesses = (refresh) => call("GET", "/meetings/harnesses" + (refresh ? "?refresh=1" : "")).then((r) => {
+      if (!r) return;
+      setHarnesses(r);
+      setLimits({ min: r.min_participants || 2, max: r.max_participants || 5 });
+    }).catch(() => {});
+  useEffect(() => {
+    call("GET", "/meetings/harnesses").then((r) => {
+      if (!r) return;
+      setHarnesses(r);
+      setLimits({ min: r.min_participants || 2, max: r.max_participants || 5 });
+    }).catch(() => {});
+  }, []);
+  const rows = harnesses.harnesses || [];
+  const agentOptions = (rows.length ? rows : [{ id: "kiro", label: "Kiro", runtime: "kiro_crew", available: true }]).map((x) =>
+    h("option", { key: x.id, value: x.id, disabled: !x.available }, x.label + (x.runtime === "external_cli" ? "（Kiro Crew 外で実行）" : "") + (x.available ? "" : "　— 使えません: " + (x.reason || ""))));
+  const outside = [...parts.map((p) => p.harness), organiser].some((id) => (rows.find((x) => x.id === id) || {}).runtime === "external_cli");
+  const blocked = [...parts.map((p) => p.harness), organiser].filter((id) => rows.length && !(rows.find((x) => x.id === id) || {}).available);
+  const setPart = (i, key, value) => setParts(parts.map((p, j) => (j === i ? { ...p, [key]: value } : p)));
+  const validParts = parts.filter((p) => p.perspective.trim());
   const [project, setProject] = useState(d.projects[0] ? d.projects[0].id : "proj-foreman");
   const workers = d.slots.filter((s) => s.is_live && !["会議参加者", "議事整理", "判定係"].includes(s.role));
   const [target, setTarget] = useState({});
@@ -151,8 +180,26 @@ function Meetings({ d, call }) {
       h("div", { style: S.row },
         h("select", { style: { ...S.input, flex: "0 0 auto" }, value: project, onChange: (e) => setProject(e.target.value) }, ...d.projects.map((p) => h("option", { key: p.id, value: p.id }, p.name))),
         h("input", { style: S.input, value: topic, onChange: (e) => setTopic(e.target.value), placeholder: "議題（例: セーブ時の安心感を与える演出）" }),
-        h("button", { style: S.btnOk, disabled: !topic.trim(), onClick: () => call("POST", "/meetings", { project_id: project, topic: topic.trim() }).then(() => setTopic("")) }, "開催")
+        h("button", { style: S.btnOk, disabled: !topic.trim() || validParts.length < limits.min || blocked.length > 0, onClick: () => call("POST", "/meetings", { project_id: project, topic: topic.trim(), participants: validParts.map((p) => ({ perspective: p.perspective.trim(), harness: p.harness })), synthesizer_harness: organiser }).then(() => setTopic("")) }, "開催")
       ),
+      h("div", { style: { marginTop: 10 } },
+        h("div", { style: S.mute }, `参加者（${limits.min}〜${limits.max}人）: それぞれの視点と、どのAIで参加するか`),
+        ...parts.map((p, i) => h("div", { key: i, style: { ...S.row, marginTop: 6 } },
+          h("span", { style: { width: 20 } }, String.fromCharCode(65 + i)),
+          h("input", { style: S.input, value: p.perspective, onChange: (e) => setPart(i, "perspective", e.target.value), placeholder: "視点（例: 実装工数・リスクの視点）", "aria-label": `参加者${String.fromCharCode(65 + i)}の視点` }),
+          h("select", { style: { ...S.input, flex: "0 0 auto" }, value: p.harness, onChange: (e) => setPart(i, "harness", e.target.value), "aria-label": `参加者${String.fromCharCode(65 + i)}のAI` }, ...agentOptions),
+          h("button", { style: S.btn, disabled: parts.length <= limits.min, onClick: () => setParts(parts.filter((_, j) => j !== i)), "aria-label": `参加者${String.fromCharCode(65 + i)}を外す` }, "−"))),
+        h("div", { style: { ...S.row, marginTop: 6 } },
+          h("button", { style: S.btn, disabled: parts.length >= limits.max, onClick: () => setParts([...parts, { perspective: "", harness: "kiro" }]) }, "＋ 参加者を追加"),
+          h("span", { style: S.mute }, "整理役（幽霊）:"),
+          h("select", { style: { ...S.input, flex: "0 0 auto" }, value: organiser, onChange: (e) => setOrganiser(e.target.value), "aria-label": "整理役のAI" }, ...agentOptions)),
+        h("div", { style: S.mute }, "開始前に全員へ参加確認を送り、答えられないAI（未ログインなど）がいれば会議を始めずに理由を表示します。各AIは道具（ファイル操作など）を持たず、文章で答えるだけです。"),
+        h("div", { style: { ...S.row, marginTop: 4 } },
+          ...rows.map((x) => h(Badge, { key: x.id, text: `${x.label}: ${x.available ? "使えます" : "使えません"}`, color: x.available ? C.ok : C.bad })),
+          h("button", { style: S.btn, onClick: () => loadHarnesses(true) }, "↻ 再確認")),
+        ...rows.filter((x) => !x.available && x.reason).map((x) => h("div", { key: "r" + x.id, style: { color: C.warn, fontSize: 12 } }, `${x.label}: ${x.reason}`)),
+        outside ? h("div", { style: { ...S.log, borderColor: C.warn } },
+          "⚠️ Claude Code / Codex は Kiro Crew の外で、Ghost Foreman が直接起動します（ブレストに限った例外）。道具（ツール）は使えず文章のやり取りだけです。緊急停止・実行記録・メモリ管理は Ghost Foreman が行います。各サービスの利用枠を使います。") : null),
       h("div", { style: S.mute }, "相談段階では何も実装しません。あなたが案を採用したときだけ、担当スロットへ発注します。")
     ),
     ...d.meetings.map((m) => {
@@ -164,6 +211,10 @@ function Meetings({ d, call }) {
         h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: m.project_id }), h("span", { style: S.row }, h(Badge, { text: live ? "実AI" : "模擬", color: live ? C.ok : C.warn }), h(Badge, { text: m.status === "running" ? "進行中…" : m.status, color: m.status === "running" ? C.accent : C.mute }))),
         h("h3", { style: { margin: "8px 0" } }, "議題: " + m.topic),
         h("div", { style: S.mute }, "参加: " + m.participants.join(" / ")),
+        (m.summary && m.summary.participants_detail) ? h("div", { style: { ...S.row, marginTop: 4 } },
+          ...[...m.summary.participants_detail, ...(m.summary.synthesizer ? [{ ...m.summary.synthesizer, speaker: "整理役（" }] : [])].map((p, i) =>
+            h(Badge, { key: i, text: `${p.speaker ? p.speaker.split("（")[0] : ""}: ${p.label || p.harness}・${p.runtime_label || ""}${p.model ? "・" + p.model : ""}${p.ran_on ? (p.verified ? "" : "（未確認）") : "（未実行）"}`, color: p.verified ? (p.runtime === "external_cli" ? C.warn : C.ok) : C.mute }))) : null,
+        (m.summary && m.summary.outside_kiro_crew) ? h("div", { style: { color: C.warn, fontSize: 12, marginTop: 4 } }, "この会議には、Kiro Crew の外で Ghost Foreman が直接起動したAI（ツールなし・文章のみ）が含まれます。") : null,
         ...m.rounds.map((r, i) => h("div", { key: i, style: S.log }, h("strong", null, r.phase), ...r.entries.map((e, j) => h("div", { key: j, style: { marginTop: 6 } }, h("strong", null, e.speaker + ": "), e.proposal || e.critique)))),
         m.summary && m.summary.consensus
           ? h("div", { style: { ...S.log, borderColor: C.accent } },
@@ -287,6 +338,13 @@ function Settings({ d, call }) {
         h("thead", null, h("tr", { style: { textAlign: "left" } }, ...["提供元", "呼び出し", "成功", "トークン(入/出)", "請求額"].map((t) => h("th", { key: t }, t)))),
         h("tbody", null, ...(u.totals || []).map((t) => h("tr", { key: t.provider_id }, h("td", null, t.provider_id), h("td", null, t.calls), h("td", null, t.ok_calls), h("td", null, `${t.input_tokens} / ${t.output_tokens}`), h("td", null, t.cost_display || "未確認"))))),
       h("div", { style: S.mute }, "トークン数は提供元の実測値です。Kiro の使用量はホストが公開していないため、0ではなく未確認として扱います。有料APIへの切替機能は実装していません。")),
+    h("div", { style: S.card },
+      h("h3", { style: { marginTop: 0 } }, "🧪 Kiro Crew 外で実行したAI（会議の参加者）"),
+      h("div", { style: S.mute }, "Claude Code / Codex を Ghost Foreman が直接起動した記録です。質問の本文は保存せず、ハッシュだけを残します。請求額は確認できないため「未確認」です。"),
+      ...(d.external_runs || []).map((r) => h("div", { key: r.id, style: { ...S.log, borderColor: r.status === "ok" ? C.ok : C.bad } },
+        h("strong", null, `[${r.status}] ${r.harness}${r.model ? "・" + r.model : ""}`), ` ${r.started_at}　${Math.round((r.duration_ms || 0) / 100) / 10}秒　トークン ${r.input_tokens}/${r.output_tokens}　会議 ${r.meeting_id || "-"}`,
+        r.error ? h("div", { style: { color: C.bad } }, r.error) : null)),
+      (d.external_runs || []).length ? null : h("div", { style: S.mute }, "まだ記録はありません。")),
     h("div", { style: S.card },
       h("h3", { style: { marginTop: 0 } }, "🔔 通知の履歴"),
       h("div", { style: S.mute }, "sent=送信 / held=おやすみ中に保留 / held_resident=常駐モードのため通知せず / failed=失敗 / not_sent=模擬モード"),

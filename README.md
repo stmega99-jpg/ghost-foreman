@@ -100,6 +100,24 @@ Ghost Foreman can use the official Gemini API for low-cost work (news summaries,
 Tests for the failure paths (quota exhaustion, overloaded model, rejected key, SSRF guard) use an injected transport: `python -m unittest discover -s tests -v`.
 
 
+## AI meeting participants (Kiro, Claude Code, Codex)
+
+Each meeting participant can be **Kiro**, **Claude Code** or **Codex**, chosen per participant in the meeting form.
+
+- **Kiro** runs inside Kiro Crew, in a Ghost Foreman managed slot on the app's `meeting-participant` agent. It is labelled 「Kiro Crew で実行」. Kiro Crew starts a Kiro session only after its `kirocrew-guide` and `kirocrew-mate` servers each advertise a tool, so this agent sees one read-only tool on each (`search_docs`, `find_capabilities`) and nothing else. Ghost Foreman does not auto-approve them, so any call waits for you.
+- **Claude Code and Codex run outside Kiro Crew.** Kiro Crew 0.12.2 gives an app no way to choose the backend of its own slots, so for brainstorming only, Ghost Foreman starts the `claude` and `codex` CLIs directly (`backend/external_ai.py`). The UI and the minutes label them 「Kiro Crew 外で実行」. All other work still goes through Kiro Crew.
+- Participants outside Kiro Crew handle text only. Tools, MCP servers, web search, hooks and file writes are disabled on the command line. A run that tries to use a tool or asks for an API key is killed. The CLI gets an allowlisted environment with no API keys.
+- Ghost Foreman's emergency stop kills every running CLI. On Windows each CLI is created suspended, put in its own Job Object and only then resumed (`backend/winjob.py`), so a stop ends the CLI and every process it started, even one being created at that moment. When a CLI exits, anything it left running is ended too. If the job cannot be set up, the CLI is not started. Each run is recorded in `external_runs`, with the prompt stored only as a SHA-256 hash. `GET /api/apps/ghost-foreman/meetings/external-runs` lists the runs, and the Settings tab shows them. Cost is shown as unconfirmed (未確認), never as $0.
+- Limits: 2 CLI runs at a time, and a run only starts when the PC has at least 1.5 GB of free memory (RAM).
+- Round 0 asks every participant to say which AI it is. The answer and the reported model are kept in the minutes (`participants_detail`).
+
+**Requirements on the PC:** install the CLIs and sign in with your subscription (not an API key):
+- Claude Code: run `claude` in a terminal, then `/login`.
+- Codex: run `codex login` (ChatGPT sign-in).
+
+`GET /api/apps/ghost-foreman/meetings/harnesses?refresh=1` shows whether each one can run right now.
+
+
 ## Remote access from an iPhone (Tailscale Serve)
 
 The Gateway listens on `127.0.0.1` only. To reach it from a phone **without opening a port to the internet**, publish it inside your private tailnet with Tailscale Serve (not Funnel). Only devices signed in to your Tailscale account can connect, and the dashboard still requires its access token.
