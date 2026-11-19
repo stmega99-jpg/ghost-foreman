@@ -63,7 +63,7 @@ Some honest notes:
 
 ## Try it without any account
 
-There is a demo page that runs the same screen on made-up sample data in the browser. Its Content-Security-Policy is `connect-src 'none'`, so the page can't open any connection: no AI, no key, no personal computer. It is labelled "Demo sample (simulated)". Run it with `python dev_server.py`, or open the hosted copy if one is linked in the README.
+There is a demo page that runs the same screen on made-up sample data in the browser. Its Content-Security-Policy is `connect-src 'none'`, so the page can't open any connection: no AI, no key, no personal computer. It is labelled "Demo sample (simulated)". Open the hosted copy at https://stmega99-jpg.github.io/ghost-foreman/ (it is published from only five static files), or run it yourself with `python dev_server.py`.
 
 ## What's next
 

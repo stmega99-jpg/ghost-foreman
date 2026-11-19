@@ -28,7 +28,7 @@ Record in **English** (screen language switch: English) so the picture and the s
 | 1:45–2:00 | Tick the permission, start. Round 0 "participation check" shows each AI's real reply and where it ran. | Every AI must answer a check first, and the minutes record which AI really ran and where. |
 | 2:00–2:20 | Rounds 1–2 scroll by (sped up). The Ghost's summary: agreement, disagreement, options. Tap "Save only" (or adopt an option). | Independent ideas, mutual critique, then a summary. Nothing is built until you choose. |
 | 2:20–2:40 | Tap **Stop all**. Slots show "stopped". Show that a running outside AI ended. Then the human-only "Lift every stop". | One button stops everything, including AIs started outside Kiro Crew. Only a human can lift it, and lifting it doesn't restart work. |
-| 2:40–2:50 | Card: GitHub URL, "Demo with sample data" URL (if hosted), and the status line. | Not built yet: voice control, scheduled news. PC control is simulated. Code is MIT-licensed, built with Kiro. |
+| 2:40–2:50 | Card: GitHub URL, the hosted demo URL https://stmega99-jpg.github.io/ghost-foreman/ (sample data), and the status line. | Not built yet: voice control, scheduled news. PC control is simulated. Code is MIT-licensed, built with Kiro. |
 
 Total: 2:50. If it runs long, drop the 1:20–1:30 scene first.
 
