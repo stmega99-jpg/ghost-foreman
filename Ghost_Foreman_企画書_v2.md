@@ -303,7 +303,7 @@ Kiro Crew 0.12.2（`kiro_crew`）の内部実装との整合性を保つため�
   8. Social Blitz Prize：文頭に `#KiroweenHackathon26` を付けた投稿のURLを提出フォームに入れる。
 - **審査用の動作確認手段（Testing欄）**
   - 実機：Kiro Crew 0.12.2 に導入する手順（READMEの「Inside Kiro Crew」）。
-  - Kiro Crew なし：READMEの「Without Kiro Crew」の模擬デモとテスト（Kiro Crew と aiohttp が無い環境でも、単体テストと模擬デモが動くことを確認済み）。**模擬と表示する。**
+  - Kiro Crew なし：READMEの「Demo with sample data」。実機と同じ画面（日本語/英語）を、ブラウザの中の見本データで動かす（`demo/`）。AI・アカウント・PCには接続できない作りで（CSP `connect-src 'none'`）、画面に「デモ用の見本（模擬）」と表示する。**模擬であり、実機の動作ではない。**
   - 実機の動きは、デモ動画で示す。
 - **デモ動画の方針（3分未満・英語字幕付き）**
   - 公式ルールは「3分未満。3分を超えた分は審査員が見るとは限らない」。YouTubeに公開で上げ、**そのアプリが動作する端末での実際の動作**を見せる。著作権のある音楽は使わない。目標は2分50秒以内。

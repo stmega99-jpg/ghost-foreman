@@ -112,6 +112,8 @@ const EN = {
   "作業を頼む相手:": "Ask this AI to do the work:",
   "作業を頼むAI": "AI to do the work",
   "（頼める本物のAIがいません）": "(no real AI is available to ask)",
+  "・見本": " (sample)",
+  "見本のAIに頼みます。実際のAIには何も送られません。": "The request goes to a sample AI. Nothing is sent to a real AI.",
   "{name}（{role}）": "{name} ({role})",
   "いまは保存だけする": "Just save it for now",
   "この案で進める（作業を頼む）": "Go with this option (order the work)",
@@ -141,7 +143,6 @@ const EN = {
   "▲ くわしい設定を閉じる": "▲ Close detailed settings",
   "▼ くわしく設定する（任意）": "▼ Detailed settings (optional)",
   "参加者ごとに、どの視点で意見を出すか・どのAIにするかを決められます。同じAIを何人か入れることもできます。": "For each participant you can choose the point of view and the AI. You can also add the same AI more than once.",
-  "視点（例: 実装工数・リスクの視点）": "Point of view (e.g. effort and risk)",
   "参加者{n}の視点": "Participant {n}'s point of view",
   "参加者{n}のAI": "Participant {n}'s AI",
   "参加者{n}を外す": "Remove participant {n}",
@@ -537,7 +538,9 @@ const WHERE = { external_cli: T("（Kiro Crew 外で実行）"), gemini_api: T("
 function MeetingCard({ m, d, call }) {
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState("");
-  const workers = d.slots.filter((s) => s.is_live && !["会議参加者", "議事整理", "判定係"].includes(s.role));
+  // A real Gateway: only real AIs can be asked to work. A demo (sample data): the sample AIs can, so the whole flow can be tried; nothing is sent to a real AI.
+  const demoMode = !!(d.mode_state && d.mode_state.gateway_mode !== "live_gateway");
+  const workers = d.slots.filter((s) => (s.is_live || demoMode) && !["会議参加者", "議事整理", "判定係"].includes(s.role));
   const chosen = target || (workers.find((w) => w.project_id === m.project_id) || workers[0] || {}).id || "";
   const sm = m.summary || {};
   const live = sm.live !== false;
@@ -568,7 +571,8 @@ function MeetingCard({ m, d, call }) {
           h("div", { style: S.row },
             h("span", { style: S.mute }, t("作業を頼む相手:")),
             h("select", { style: { ...S.input, flex: "0 0 auto" }, value: chosen, onChange: (e) => setTarget(e.target.value), "aria-label": t("作業を頼むAI") },
-              ...(workers.length ? workers : [{ id: "", name: t("（頼める本物のAIがいません）") }]).map((w) => h("option", { key: w.id || "none", value: w.id }, w.id ? t("{name}（{role}）", { name: w.name, role: w.role }) : w.name)))),
+              ...(workers.length ? workers : [{ id: "", name: t("（頼める本物のAIがいません）") }]).map((w) => h("option", { key: w.id || "none", value: w.id }, w.id ? t("{name}（{role}）", { name: w.name, role: w.role }) + (w.is_live ? "" : t("・見本")) : w.name)))),
+          workers.length && workers.every((w) => !w.is_live) ? h("div", { style: S.mute }, t("見本のAIに頼みます。実際のAIには何も送られません。")) : null,
           ...(sm.options_for_human || []).map((o) =>
             h("div", { key: o.id, style: { ...S.log, borderColor: C.accent } },
               h("strong", null, tb(o.label)), o.detail ? h("div", null, o.detail) : null,
@@ -605,7 +609,7 @@ function Consult({ d, call }) {
     if (first && !seeded.current) {
       seeded.current = true;
       // Recommended: every AI that can run now, except Gemini (it needs a permission for each meeting).
-      setParts((r.harnesses || []).filter((x) => x.available && x.id !== "gemini").map((x, i) => ({ perspective: defaultPerspective(i), harness: x.id })));
+      setParts((r.harnesses || []).filter((x) => x.available && x.id !== "gemini").map((x) => ({ perspective: "", harness: x.id })));
     }
   };
   const loadHarnesses = (refresh) => call("GET", "/meetings/harnesses" + (refresh ? "?refresh=1" : "")).then((r) => apply(r, false)).catch(() => {});
@@ -623,9 +627,8 @@ function Consult({ d, call }) {
   const blocked = chosenIds.filter((id) => rows.length && !rowOf(id).available);
   const agentOptions = (rows.length ? rows : [{ id: "kiro", label: "Kiro", runtime: "kiro_crew", available: true }]).map((x) =>
     h("option", { key: x.id, value: x.id, disabled: !x.available }, x.label + (WHERE[x.runtime] ? t(WHERE[x.runtime]) : "") + (x.available ? "" : t("　— 使えません"))));
-  const nextPerspective = () => { const all = PERSPECTIVES.map((v) => t(v)); return all.find((v) => !parts.some((p) => p.perspective.trim() === v)) || all[parts.length % all.length]; };
   // Ticking adds one participant; unticking removes the participants of that AI. Everyone else keeps their edits.
-  const togglePick = (id) => setParts(countOf(id) ? parts.filter((p) => p.harness !== id) : [...parts, { perspective: nextPerspective(), harness: id }]);
+  const togglePick = (id) => setParts(countOf(id) ? parts.filter((p) => p.harness !== id) : [...parts, { perspective: "", harness: id }]);
   const setPart = (i, key, value) => setParts(parts.map((p, j) => (j === i ? { ...p, [key]: value } : p)));
   const letter = (i) => String.fromCharCode(65 + i);
 
@@ -681,7 +684,7 @@ function Consult({ d, call }) {
         h("div", { style: S.mute }, t("参加者ごとに、どの視点で意見を出すか・どのAIにするかを決められます。同じAIを何人か入れることもできます。")),
         ...parts.map((p, i) => h("div", { key: i, style: { ...S.row, marginTop: 6 } },
           h("span", { style: { width: 20 } }, letter(i)),
-          h("input", { style: S.input, value: p.perspective, onChange: (e) => setPart(i, "perspective", e.target.value), placeholder: t("視点（例: 実装工数・リスクの視点）"), "aria-label": t("参加者{n}の視点", { n: letter(i) }) }),
+          h("input", { style: S.input, value: p.perspective, onChange: (e) => setPart(i, "perspective", e.target.value), placeholder: defaultPerspective(i), "aria-label": t("参加者{n}の視点", { n: letter(i) }) }),
           h("select", { style: { ...S.input, flex: "0 0 auto" }, value: p.harness, onChange: (e) => setPart(i, "harness", e.target.value), "aria-label": t("参加者{n}のAI", { n: letter(i) }) }, ...agentOptions),
           h("button", { style: S.btn, disabled: parts.length <= limits.min, onClick: () => setParts(parts.filter((_, j) => j !== i)), "aria-label": t("参加者{n}を外す", { n: letter(i) }) }, "−"))),
         h("div", { style: { ...S.row, marginTop: 6 } },
