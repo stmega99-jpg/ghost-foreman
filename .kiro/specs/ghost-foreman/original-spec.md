@@ -1,3 +1,5 @@
+> **Original spec (2026-11-18), kept as it was written.** It was the only spec file when the project started; it is short because most detail lived in the plan (`Ghost_Foreman_企画書_v2.md`). The `requirements.md`, `design.md` and `tasks.md` next to it were reconstructed on 2026-11-19 from the real pull-request history.
+
 # Ghost Foreman — Kiro Spec (`.kiro/specs/ghost-foreman.md`)
 
 ## 1. Overview
