@@ -266,6 +266,54 @@ class NoRetryOnAnotherModelAfterAStop(unittest.TestCase):
         self.assertNotEqual(status and status["status"], "key_rejected", "a stop does not mark the key as rejected")
 
 
+class SelfReport(unittest.TestCase):
+    """What an AI called itself vs. the AI that was actually called. Replies are the real ones seen on 2026-11-19."""
+
+    def test_real_replies(self):
+        from backend.meeting import check_self_report as c
+
+        self.assertEqual(c("claude", "Claude (Anthropic) — claude-sonnet-4-6  準備OK")["status"], "ok")
+        self.assertEqual(c("codex", "OpenAI Codex 準備OK")["status"], "ok")
+        self.assertEqual(c("kiro", "私は Kiro Crew 上で動く Kiro です（モデルは「Auto」で、具体名は不明です）。 準備OK")["status"], "ok")
+        g = c("gemini", "私はGoogleのClaudeではありません、Anthropic社が開発したAIアシスタント、Claudeです。準備OK")
+        self.assertEqual((g["status"], g["names"]), ("other_name", ["Claude"]))
+        self.assertIn("実際に答えたのは Gemini", g["note"])
+
+    def test_other_cases(self):
+        from backend.meeting import check_self_report as c
+
+        self.assertEqual(c("gemini", "Google の Gemini です。準備OK")["status"], "ok")
+        self.assertEqual(c("gemini", "ジェミニです。準備OK")["status"], "ok")
+        self.assertEqual(c("gemini", "AIアシスタントです。準備OK")["status"], "no_own_name")
+        self.assertEqual(c("kiro", "Kiro です。中身は Claude Sonnet です。準備OK")["status"], "ok", "Kiro may run a Claude model")
+        self.assertEqual(c("claude", "I am ChatGPT by OpenAI. 準備OK")["status"], "other_name")
+        self.assertEqual(c("codex", "Gemini です")["names"], ["Gemini"])
+
+    def test_gemini_is_told_its_own_name(self):
+        self.assertIn("You are Gemini", meeting_mod.GEMINI_SYSTEM)
+        self.assertIn("Google", meeting_mod.GEMINI_SYSTEM)
+
+    def test_a_wrong_self_introduction_is_flagged_but_does_not_change_who_answered(self):
+        class ClaimsClaude(FakeGemini):
+            def generate(self, prompt, **kw):
+                res = super().generate(prompt, **kw)
+                if "参加確認" in prompt:
+                    res.text = "Anthropic社が開発したAIアシスタント、Claudeです。準備OK"
+                return res
+
+        store, adapter, live, ext, fake, router, engine = setup(ClaimsClaude())
+        m = wait(engine, engine.start("proj-foreman", "議題", WITH_GEMINI, synthesizer_harness="kiro", allow_unpublished_to_gemini=True)["id"])
+        self.assertEqual(m["status"], "awaiting_human_adoption", "the meeting goes on")
+        g = m["summary"]["participants_detail"][1]
+        self.assertTrue(g["verified"], "who answered comes from the call, not the text")
+        self.assertEqual(g["ran_on"], "gemini")
+        self.assertEqual(g["self_report_check"]["status"], "other_name")
+        self.assertTrue(m["summary"]["self_report_mismatch"])
+        self.assertIn("⚠️ 自己紹介に別のAIの名前（Claude）", json.dumps(m["rounds"][0], ensure_ascii=False))
+        others = [p for i, p in enumerate(m["summary"]["participants_detail"]) if i != 1]
+        self.assertTrue(all(p["self_report_check"]["status"] == "ok" for p in others))
+
+
 class Route(unittest.TestCase):
     def test_only_a_literal_true_in_the_request_counts_as_permission(self):
         from backend import routes
