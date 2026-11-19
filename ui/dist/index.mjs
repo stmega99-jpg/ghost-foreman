@@ -112,6 +112,8 @@ const EN = {
   "作業を頼む相手:": "Ask this AI to do the work:",
   "作業を頼むAI": "AI to do the work",
   "（頼める本物のAIがいません）": "(no real AI is available to ask)",
+  "・見本": " (sample)",
+  "見本のAIに頼みます。実際のAIには何も送られません。": "The request goes to a sample AI. Nothing is sent to a real AI.",
   "{name}（{role}）": "{name} ({role})",
   "いまは保存だけする": "Just save it for now",
   "この案で進める（作業を頼む）": "Go with this option (order the work)",
@@ -536,7 +538,9 @@ const WHERE = { external_cli: T("（Kiro Crew 外で実行）"), gemini_api: T("
 function MeetingCard({ m, d, call }) {
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState("");
-  const workers = d.slots.filter((s) => s.is_live && !["会議参加者", "議事整理", "判定係"].includes(s.role));
+  // A real Gateway: only real AIs can be asked to work. A demo (sample data): the sample AIs can, so the whole flow can be tried; nothing is sent to a real AI.
+  const demoMode = !!(d.mode_state && d.mode_state.gateway_mode !== "live_gateway");
+  const workers = d.slots.filter((s) => (s.is_live || demoMode) && !["会議参加者", "議事整理", "判定係"].includes(s.role));
   const chosen = target || (workers.find((w) => w.project_id === m.project_id) || workers[0] || {}).id || "";
   const sm = m.summary || {};
   const live = sm.live !== false;
@@ -567,7 +571,8 @@ function MeetingCard({ m, d, call }) {
           h("div", { style: S.row },
             h("span", { style: S.mute }, t("作業を頼む相手:")),
             h("select", { style: { ...S.input, flex: "0 0 auto" }, value: chosen, onChange: (e) => setTarget(e.target.value), "aria-label": t("作業を頼むAI") },
-              ...(workers.length ? workers : [{ id: "", name: t("（頼める本物のAIがいません）") }]).map((w) => h("option", { key: w.id || "none", value: w.id }, w.id ? t("{name}（{role}）", { name: w.name, role: w.role }) : w.name)))),
+              ...(workers.length ? workers : [{ id: "", name: t("（頼める本物のAIがいません）") }]).map((w) => h("option", { key: w.id || "none", value: w.id }, w.id ? t("{name}（{role}）", { name: w.name, role: w.role }) + (w.is_live ? "" : t("・見本")) : w.name)))),
+          workers.length && workers.every((w) => !w.is_live) ? h("div", { style: S.mute }, t("見本のAIに頼みます。実際のAIには何も送られません。")) : null,
           ...(sm.options_for_human || []).map((o) =>
             h("div", { key: o.id, style: { ...S.log, borderColor: C.accent } },
               h("strong", null, tb(o.label)), o.detail ? h("div", null, o.detail) : null,

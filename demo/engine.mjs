@@ -316,6 +316,8 @@ export function createEngine({ getLang = () => "ja", clock = () => new Date() } 
       if (!target) fail(400, "作業を頼む相手が見つかりません", "The assignee was not found");
       if (halted(target)) fail(409, "停止中のスロットには頼めません", "A stopped slot cannot be given work");
       m.status = "adopted_and_scheduled";
+      // The sample AI only "receives" the plan here (a line in its history). Nothing is sent anywhere.
+      target.history.push({ role: "system", text: L("【見本】採用された案を受け取りました（実際のAIには何も送っていません）", "[Sample] Received an adopted plan (nothing was sent to a real AI)") });
       target.next_task = L(`［会議の採用案］${m.topic}（${b.option_id}）`, `[Adopted from a meeting] ${m.topic} (${b.option_id})`);
       return { meeting_id: m.id, action: "scheduled_to_slot", slot_id: target.id };
     },

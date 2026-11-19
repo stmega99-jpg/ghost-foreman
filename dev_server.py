@@ -1,8 +1,9 @@
 """Standalone HTTP server for Ghost Foreman (`python dev_server.py`).
 
 It serves the demo page (``demo/index.html``): the same screen as the real app, running on made-up sample data in
-the browser (``demo/engine.mjs``). The page makes no requests of its own, so this server only hands out static files.
-The Python backend with simulated slots is still reachable under ``/api/...`` for API checks (it is not used by the demo).
+the browser (``demo/engine.mjs``). The page makes no requests of its own.
+This server serves files only from ``demo/`` and ``ui/``, and ALSO keeps the Python backend with simulated slots reachable
+under ``/api/...`` on 127.0.0.1 for API checks (the demo page does not use it, and its CSP stops it from calling it).
 """
 from __future__ import annotations
 import json

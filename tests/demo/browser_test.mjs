@@ -77,6 +77,21 @@ expect("switching to English translates the meeting too", await waitText("Everyo
 await dump("meeting_en");
 expect("no Japanese is left in the English meeting card", await page.evaluate(() => { const card = [...document.querySelectorAll("div")].filter((d) => d.innerText.includes("The Ghost's summary")).pop(); return !/[\u3040-\u30ff\u4e00-\u9fff]/.test(card.innerText.replace("日本語", "")); }));
 
+// adopt an option: the sample AI is offered, with a note that nothing goes to a real AI
+expect("a sample AI can be asked to do the adopted work, and the screen says nothing goes to a real AI", (await text()).includes("The request goes to a sample AI. Nothing is sent to a real AI.") && (await page.evaluate(() => [...document.querySelectorAll("select")].some((s) => /sample/.test(s.innerText)))));
+await clickText("Go with this option");
+await waitText("See past consultations", 8000);
+await clickText("See past consultations");
+const adopted = await waitText("Adopted; work was ordered", 8000);
+expect("adopting an option works on the demo", adopted);
+await clickText("Back to home");
+await clickText("See how the AIs are doing");
+await waitText("See in details", 8000);
+await clickText("See in details");
+await dump("ais2");
+expect("the sample AI shows the adopted plan as its next task", await waitText("Adopted from a meeting"));
+await clickText("Back to home");
+
 // emergency stop and the human-only resume
 await clickText("Back to home");
 await clickText("Stop all");

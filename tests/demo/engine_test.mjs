@@ -84,6 +84,7 @@ const fin = d.meetings.find((y) => y.id === m.id);
 expect("the finished meeting offers options, with a save-only choice", fin.summary.options_for_human.length === 3 && fin.summary.options_for_human.some((o) => o.id === "hold_as_idea"));
 r = await e.handle("POST", "/meetings/adopt", { meeting_id: m.id, option_id: "opt2", target_slot_id: "slot-03" });
 expect("adopting schedules work only on a slot the human picked", r.action === "scheduled_to_slot" && (await dash()).slots.find((s) => s.id === "slot-03").next_task.includes("opt2"));
+{ const sl = (await dash()).slots.find((x) => x.id === "slot-03"); expect("the sample AI only records that it got the plan, and stays a sample", sl.is_live === false && sl.history.at(-1).text.includes("見本") && sl.history.at(-1).text.includes("実際のAIには何も送っていません")); }
 expect("an adopted meeting cannot be adopted again", (await rejects(e.handle("POST", "/meetings/adopt", { meeting_id: m.id, option_id: "opt1", target_slot_id: "slot-03" }))).status === 400);
 const m2 = await e.handle("POST", "/meetings", { topic: "もう一つ", participants: [{ perspective: "a", harness: "claude" }, { perspective: "b", harness: "codex" }] });
 now += 6000;

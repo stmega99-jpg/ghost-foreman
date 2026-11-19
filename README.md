@@ -78,8 +78,9 @@ python verify_phase1_and_2.py      # 8 acceptance suites
 python -m unittest discover -s tests
 ```
 `demo/index.html` runs the **same screen as the real app** (`ui/dist/index.mjs`, Japanese and English) on **made-up sample data** that lives in the browser (`demo/engine.mjs`). It is labelled "Demo sample (simulated)" on screen and is **not live**: no AI is called, and nothing you type is sent anywhere.
-- The page's Content-Security-Policy is `connect-src 'none'`, so the page cannot open any connection (fetch, XHR, WebSocket), even to its own server. `dev_server.py` only hands out static files from `demo/` and `ui/`.
-- It cannot reach an AI contract, an API key or the owner's PC, because it has no code path to them. Questions, the emergency stop (only a person can lift it), the 4-AI meeting (including the per-meeting Gemini permission rule) and the language switch all work on the sample data. The meeting's answers are fixed sample text.
+- The page's Content-Security-Policy is `connect-src 'none'`, so the page cannot open any connection (fetch, XHR, WebSocket), even to its own server.
+- `dev_server.py` serves files only from `demo/` and `ui/` (everything else on disk is 404). It **also still exposes the Python backend's simulated API under `/api/...`** on 127.0.0.1, for API checks; the demo page does not use it and, because of the CSP, cannot call it. Its news endpoint can fetch a public web address you give it, so treat it as a local tool and do not expose it beyond 127.0.0.1. A hosted static copy has no `/api` at all.
+- The demo page cannot reach an AI contract, an API key or the owner's PC, because it has no code path to them. Questions, the emergency stop (only a person can lift it), the 4-AI meeting (including the per-meeting Gemini permission rule) and the language switch all work on the sample data. The meeting's answers are fixed sample text.
 - Tests: `node tests/demo/engine_test.mjs` (rules of the sample engine) and `tests/demo/browser_test.mjs` (real Chrome: both languages, a question, a meeting, the stop, and that no request leaves the page).
 - The same folder can be hosted as a static site. That is not enabled yet; if it is, this section will give the address.
 ---
