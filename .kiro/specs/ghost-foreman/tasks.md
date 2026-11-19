@@ -22,7 +22,7 @@
 
 ## Remaining before submission (2026-12-03 target; deadline 2026-12-05 07:00 JST)
 
-- [ ] Merge the demo PR. Decide, with the owner, whether to host the demo as a static site (a public action; not done).
+- [x] Merge the demo PR (#15) and publish the demo on GitHub Pages from a five-file list (#17). Checked on the public address with the real-Chrome demo test (21 checks).
 - [ ] `docs/KIRO_USAGE.md`: how Kiro was used (mandatory submission text).
 - [ ] `docs/DEMO_SCRIPT.md`: storyboard for a video under 3 minutes with English subtitles.
 - [ ] Blog post in English on dev.to (honest status; says it is for Kiroween 2026).

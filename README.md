@@ -82,7 +82,7 @@ python -m unittest discover -s tests
 - `dev_server.py` serves files only from `demo/` and `ui/` (everything else on disk is 404). It **also still exposes the Python backend's simulated API under `/api/...`** on 127.0.0.1, for API checks; the demo page does not use it and, because of the CSP, cannot call it. Its news endpoint can fetch a public web address you give it, so treat it as a local tool and do not expose it beyond 127.0.0.1. A hosted static copy has no `/api` at all.
 - The demo page cannot reach an AI contract, an API key or the owner's PC, because it has no code path to them. Questions, the emergency stop (only a person can lift it), the 4-AI meeting (including the per-meeting Gemini permission rule) and the language switch all work on the sample data. The meeting's answers are fixed sample text.
 - Tests: `node tests/demo/engine_test.mjs` (rules of the sample engine) and `tests/demo/browser_test.mjs` (real Chrome: both languages, a question, a meeting, the stop, and that no request leaves the page).
-- The same folder can be hosted as a static site. That is not enabled yet; if it is, this section will give the address.
+- **Hosted copy: https://stmega99-jpg.github.io/ghost-foreman/** (opens the demo). It is published by GitHub Actions (.github/workflows/pages.yml) from an explicit list of five files in scripts/build_demo_site.py: the demo page, its engine and SDK stand-in, the screen code and React. The backend, data, tests and documents are not published, and the copy has no /api. It is sample data and is labelled so; it is not the live app. 	ests/demo/browser_test.mjs can test it directly: GF_URL=https://stmega99-jpg.github.io/ghost-foreman/ node browser_test.mjs <chrome>.
 ---
 
 ## 5. Safety design

@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 const root = process.env.GF_REPO || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const chrome = process.argv[2];
+// GF_URL=https://host/path tests a hosted copy instead of a local one (this script serves nothing then).
+const remote = process.env.GF_URL ? new URL(process.env.GF_URL.replace(/\/+$/, "") + "/") : null;
 let failed = 0;
 const expect = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL") + "  " + name + (extra ? "  " + extra : "")); if (!cond) failed++; };
 const MIME = { ".html": "text/html; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json", ".png": "image/png" };
@@ -21,8 +23,9 @@ const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream" });
   res.end(fs.readFileSync(file));
 });
-await new Promise((r) => server.listen(0, "127.0.0.1", r));
-const origin = `http://127.0.0.1:${server.address().port}`;
+if (!remote) await new Promise((r) => server.listen(0, "127.0.0.1", r));
+const origin = remote ? remote.origin : `http://127.0.0.1:${server.address().port}`;
+const base = remote ? remote.pathname.replace(/\/$/, "") : "";
 const profile = fs.mkdtempSync(path.join(process.env.TEMP || "/tmp", "gf-demo-"));
 const browser = await puppeteer.launch({ executablePath: chrome, headless: "new", userDataDir: profile, args: ["--no-sandbox", "--lang=en-US"] });
 const page = await browser.newPage();
@@ -38,7 +41,7 @@ const text = () => page.evaluate(() => document.body.innerText);
 const waitText = async (s, ms = 20000) => { try { await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: ms }, s); return true; } catch { return false; } };
 const clickText = async (label, nth = 0) => page.evaluate((l, n) => { const b = [...document.querySelectorAll("button")].filter((x) => x.innerText.includes(l))[n]; if (!b) return false; b.click(); return true; }, label, nth);
 
-await page.goto(origin + "/demo/index.html", { waitUntil: "domcontentloaded" });
+await page.goto(origin + base + "/demo/index.html", { waitUntil: "domcontentloaded" });
 expect("opens in English in an English browser", await waitText("What would you like to do?"));
 expect("the banner says it is sample data, in English", (await text()).includes("Demo with sample data. No real AI, account or PC is connected"));
 await clickText("See how the AIs are doing"); await new Promise((r) => setTimeout(r, 500)); await dump("ais");
@@ -103,7 +106,7 @@ await new Promise((r) => setTimeout(r, 800));
 expect("the human can release the stop", !(await text()).includes("Lift every stop"));
 
 // nothing left the page
-const bad = requests.filter((r) => { const u = new URL(r.url); return u.origin !== origin || r.method !== "GET" || u.pathname.startsWith("/api"); });
+const bad = requests.filter((r) => { const u = new URL(r.url); return u.origin !== origin || r.method !== "GET" || u.pathname.startsWith(base + "/api"); });
 expect("every request is a GET of a static file from the demo's own server", bad.length === 0, bad.slice(0, 3).map((r) => r.method + " " + r.url).join(" | "));
 const netTry = await page.evaluate(async () => {
   const out = {};
@@ -113,11 +116,12 @@ const netTry = await page.evaluate(async () => {
   return out;
 });
 expect("the page's own fetch (even to its own origin) and WebSocket are blocked by the CSP", netTry.fetch === "blocked" && netTry.same === "blocked" && netTry.ws === "blocked", JSON.stringify(netTry));
-expect("only static files were served", served.every((s) => s.startsWith("GET ") && /^GET \/(demo|ui)\//.test(s)), served.filter((s) => !/^GET \/(demo|ui)\//.test(s)).join(","));
+const pages = requests.map((r) => new URL(r.url).pathname.slice(base.length));
+expect("only the demo page, its code and React were requested", pages.every((p) => /^\/(demo|ui)\//.test(p)) && (remote || served.every((s) => s.startsWith("GET ") && /^GET \/(demo|ui)\//.test(s))), pages.filter((p) => !/^\/(demo|ui)\//.test(p)).join(","));
 const realErrors = errors.filter((e) => !/Content Security Policy|violates|Failed to fetch|net::ERR_FAILED|WebSocket/.test(e));
 expect("no JavaScript errors", realErrors.length === 0, realErrors.slice(0, 2).join(" | "));
 await browser.close();
-server.close();
+if (!remote) server.close();
 fs.rmSync(profile, { recursive: true, force: true });
 console.log(failed ? `${failed} FAILED` : "ALL PASSED");
 process.exit(failed ? 1 : 0);
