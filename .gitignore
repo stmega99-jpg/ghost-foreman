@@ -15,3 +15,6 @@ node_modules/
 # Do NOT ignore .kiro/ — official rules require .kiro/ at the repository root.
 !.kiro/
 !.kiro/**
+
+# Built demo site (scripts/build_demo_site.py)
+_site/
