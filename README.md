@@ -3,140 +3,142 @@
 **Your agents work. You have a life.**  
 *AIたちは働く。あなたには生活がある。*
 
-Built for **Kiroween 2026** (**Frankenstein Category** & **Best Kiro Crew App Bonus Prize**).
+Built for **Kiroween 2026** (**Frankenstein** category, and the **Best Kiro Crew App** bonus prize).
 
 ---
 
 ## 1. What is Ghost Foreman?
 
-When running 10–18+ concurrent coding and creative AI sessions (Claude Code, Codex, Kiro Bots), **the human becomes the bottleneck**—constantly interrupted by routine confirmation prompts, ambiguous design questions, and cross-agent specification conflicts.
+When you run many AI sessions at once (Claude Code, Codex, Kiro), **the human becomes the bottleneck**: routine confirmation prompts, ambiguous design questions, and decisions that conflict with what you already decided.
 
-**Ghost Foreman** is an installable **Kiro Crew App** (`app.json`) that acts as an autonomous site foreman between you and your multi-agent workspace:
-- **Proxy Decisions with Citations (代理判断)**: Answers routine agent questions automatically by citing locked project specifications and Selective Memory.
-- **Pre-flight Reverse-Probing (事前逆質問)**: When an agent asks an open-ended question not covered by current policies, Ghost Foreman probes the agent *first* for option trade-offs and file impacts before escalating a clean decision card to your smartphone.
-- **Bidirectional Human Q&A & Selective Memory (双方向質問・選択的記憶)**: Ask Ghost Foreman follow-up questions (*"JSONとSQLiteの違いは？今回ならどちらが便利？"*), then resolve once (`one_time`) or promote your decision to a permanent project rule (`permanent_policy`) with scoped batch resolution.
-- **AI Brainstorming Room & Idea Vault (AI会議室・企画秘書)**: Run structured multi-agent ideation (`Independent Ideation → Mutual Critique → Ghost Synthesis`) and convert adopted proposals directly into scheduled slot tasks.
-- **Free-Tier Router & Budget Guard (無料API枠優先ルーティング)**: Uses authorized free API tiers (e.g., Gemini Free Tier) for supervision and summarization, and strictly blocks unauthorized fallback to paid per-token APIs.
-- **Project News & Desktop Lease (制作ニュース収集・PC操作権管理)**: Separates verified facts from estimates in industry news, and manages exclusive PC screen/input leases for automated playtesting with immediate human preemption.
+Ghost Foreman is an installable **Kiro Crew app** (`app.json`) that sits between you and your AIs, like a site foreman:
+
+- **Proxy decisions with citations (代理判断).** When an AI asks a question, Ghost Foreman answers it from the rules you already decided, and records why.
+- **Reverse-probing (逆質問).** For a question no rule covers, it first asks the AI for the options and their impact (once per question), then sends you one clean decision card.
+- **Selective memory (選択的記憶).** Your answer is either "this time only" or a permanent project rule. A rule is never created without your explicit choice.
+- **AI meetings (AI会議室).** Ask several *different* AIs (Kiro, Claude Code, Codex, Gemini) for ideas, let them critique each other, and get one summary with options. Nothing is built until you pick an option.
+- **Free-tier guard (無料API枠).** Cheap work goes to the Gemini free tier; if it runs out there is **no path to a paid API**.
+- **Emergency stop (緊急停止).** One button stops everything, including AIs started outside Kiro Crew. Only a human can resume.
+- **Made for non-engineers.** The app starts from "what do you want to do?"; technical settings and run records are on a separate details screen. It also runs as its own iPhone Home Screen app.
 
 ---
 
-## 2. Frankenstein Architecture (Custom Brain × Kiro Crew Host)
+## 2. What works today — honest status
 
-| Feature Area | Implementation Strategy | How It Works |
+Everything below is labelled the same way in the app: **live** = verified against a real Kiro Crew Gateway, **simulated** = demo data only, **not implemented** = not built.
+
+| Feature (plan section) | Status | Notes |
 |---|---|---|
-| **Proxy Decisions & Reverse-Probing** | **Custom Implementation** | `ForemanSupervisor` triages questions against `PolicyStore`, probes agents for impact, blocks locked-spec violations, and logs every decision to `decisions_audit`. |
-| **Multi-Session & Worktree Management** | **Uses Kiro Crew Host** | Uses Kiro Crew's `/api/chat/slots` (**Ghost Foreman Managed Slots**) + MCP consultation bridge (`foreman_ask`) to respect Kiro Crew's cross-session privacy boundaries. |
-| **Notifications & Remote Control** | **Uses Kiro Crew Host** | Leverages Kiro Crew's PWA Push Notifications & event bus with Ghost Foreman's Resident / Away / Sleep mode filtering. |
-| **Brainstorming & Selective Memory** | **Custom Implementation** | Multi-round ideation/critique engine and versioned Global/Project policy promotion. |
-| **Free-Tier Routing & News** | **Custom + SDK Telemetry** | Prioritizes Gemini Free Tier / host-included bots and combines `/api/sessions/usage` with explicit `measured` / `estimated` / `unknown` cost labels. |
-| **Desktop Lease & Voice** | **Tech Verification + Web Speech** | Exclusive workstation lease reservation with instant human reclaim + Web Speech API voice briefing readout for commuting/gym use. |
+| Proxy decisions, reverse-probing, escalation (A) | **Live** | Verified with real Kiro Crew slots through our MCP tool `foreman_ask`. Tool approvals stay with the human; only our own `foreman_*` tools are auto-approved. A judge AI (Gemini if allowed, else a Kiro slot) matches questions to rules; if no judge is available the question is held for you. |
+| Conflicts between AIs' opinions (A) | Not implemented | Only the meeting summary lists points of disagreement. |
+| Slots view and stop (B) | **Live** (partial) | Managed slots, status, per-slot / per-project / global stop. **Not implemented:** priorities, dependencies, deadlines, automatic hand-off between AIs, retry limits. |
+| Free-tier routing and cost view (C) | **Live** (partial) | Gemini free tier with cooldown after quota errors; per-call usage records; cost shown as 未確認 (never $0). **Not implemented:** daily/weekly/monthly totals, budget reservation, resume-after-recovery scheduling. |
+| AI meetings (D) | **Live** (partial) | Kiro, Claude Code, Codex and Gemini in one meeting, three rounds, idea vault, "adopt an option → task". **Not implemented:** joining or swapping participants mid-meeting, pause/resume, time and cost limits per meeting. |
+| Selective memory (E) | **Live** (partial) | One-time vs permanent rule, global/project scope, versions, batch apply. **Not implemented:** edit/withdraw screen, conflict check, hand-off document generation. |
+| Notifications and modes (F) | **Live** (partial) | Home / away / sleep modes; Kiro Crew push; own iPhone app over Tailscale (end-to-end test passes). **Not confirmed:** push delivery to a real iPhone. |
+| Artifact review (G) | Not implemented | Left to Kiro Crew's own diff and browser features. |
+| Desktop Lease, PC control (H) | **Simulated** | A state record only. It does not control any screen, mouse or keyboard. |
+| News (I) | **Live** (partial) | You give a public URL; it is summarised with facts and estimates kept apart (SSRF-guarded). **Not implemented:** automatic or scheduled collection by interest. |
+| Voice (J) | Not implemented | No speech input or output exists. |
+
+Tests: `python -m unittest discover -s tests` (unit tests, no Kiro Crew needed), `python verify_phase1_and_2.py` (acceptance), and the UI tests in `tests/ui/` (see its README).
 
 ---
 
-## 3. Repository Structure
+## 3. Frankenstein architecture (custom brain × Kiro Crew host)
 
-```text
-ghost-foreman/
-├── app.json                         # Official Kiro Crew App Manifest
-├── .kiro/                           # Kiroween required specs & steering rules
-│   ├── specs/ghost-foreman.md
-│   └── steering/foreman-rules.md
-├── agents/
-│   └── ghost-foreman-agent.json     # Custom supervisor agent definition
-├── skills/
-│   └── foreman-protocol/SKILL.md    # Agent consultation skill
-├── backend/
-│   ├── store.py                     # SQLite persistent storage & idempotency
-│   ├── crew_adapter.py              # Managed Slots & Kiro Crew Gateway adapter
-│   ├── supervisor.py                # Proxy judgment, reverse-probe, meetings, budget router
-│   ├── hooks.py                     # on_startup / on_shutdown lifecycle hooks
-│   ├── routes.py                    # register_routes for Kiro Crew Gateway
-│   └── mcp_server.py                # MCP consultation server for external sessions
-├── dist/
-│   └── index.mjs                    # @kirocrew/app-sdk React dashboard module
-├── ui/
-│   └── index.html                   # Desktop & Mobile responsive Halloween UI
-├── dev_server.py                    # Standalone local server & simulator
-└── verify_phase1_and_2.py           # Automated acceptance test suite
-```
+| Area | Built by | How |
+|---|---|---|
+| Proxy decisions, memory, audit log | **Ghost Foreman** | `ForemanSupervisor`, SQLite store, `decisions_audit`. |
+| Slots, approvals, notifications | **Kiro Crew host** | `acquire_worker_slot`, `/api/chat/slots`, push notifications. Ghost Foreman's own slots are created and read through the host's in-process API. |
+| Bridge for any AI | **Ghost Foreman MCP server** | `backend/mcp_server.py` exposes `foreman_ask`, `foreman_report_status`, `foreman_get_policies`. |
+| Different AIs in one meeting | **Ghost Foreman + CLIs + Gemini API** | Kiro runs inside Kiro Crew; Claude Code and Codex are started directly (see §5); Gemini is called through the official API. |
+| Free tier | **Ghost Foreman** | `backend/llm_router.py`, `backend/gemini.py`. |
+| Emergency stop | **Ghost Foreman** | `backend/halt.py`, `backend/winjob.py` (Windows Job Objects). |
+| Screens | **Ghost Foreman** | React bundle `ui/dist/index.mjs` for the Kiro Crew dashboard; `ui/m/` for the phone page. |
 
 ---
 
-## 4. Installation & Usage
+## 4. Try it
 
-### A. Inside Kiro Crew (0.12+)
-1. Copy or symlink this repository into `~/.kiro/crew/apps/ghost-foreman`.
-2. Enable **Ghost Foreman** in the Kiro Crew App Store / Dashboard (`/apps/ghost-foreman`).
+**Requirements:** Kiro Crew 0.12.2 (`kirocrew`), Python 3.13, a signed-in Kiro. For the meeting AIs you also need the CLIs signed in with a subscription (not an API key): `claude` then `/login`, and `codex login`. Gemini needs `GEMINI_API_KEY` from Google AI Studio's **free tier** (a project without billing), registered in Kiro Crew under *Settings → Secrets*.
 
-### B. Standalone Local Demo & Verification
-Run the automated acceptance test suite (verifies all 8 core acceptance criteria):
+### A. Inside Kiro Crew (all "live" features)
 ```bash
-python verify_phase1_and_2.py
+kirocrew gateway                   # start the Gateway
+kirocrew app install <this-folder> # installs Ghost Foreman
+kirocrew app enable ghost-foreman
 ```
+Open the Kiro Crew dashboard → *Apps → Ghost Foreman*. When you update the app later, restart the Gateway (`kirocrew restart`) so the Python code reloads. You may be asked to approve the app's permissions in the dashboard.
 
-Launch the interactive Desktop & Mobile Web UI:
+### B. Without Kiro Crew (simulated only)
 ```bash
-python dev_server.py
-# Open http://127.0.0.1:8765/apps/ghost-foreman
+python verify_phase1_and_2.py      # 8 acceptance suites
+python -m unittest discover -s tests
+python dev_server.py               # http://127.0.0.1:8765/apps/ghost-foreman
 ```
+`dev_server.py` runs the backend against **simulated** slots with demo data. It serves the older single-file screen (`ui/index.html`), not the current app screen.
 
 ---
 
-## 5. License
-MIT License — see [LICENSE](./LICENSE).
+## 5. Safety design
 
+- **Emergency stop is human-only to lift.** While it is in force, nothing is auto-answered, auto-ordered, resumed, or auto-approved; questions that arrive are held for you.
+- **Free-tier guard.** There is no code path to a metered paid API (`cost_usd` is NULL = unconfirmed). If Gemini's free tier is exhausted, a meeting's Gemini participant simply has no answer; no other AI answers in its place.
+- **Per-meeting permission for Gemini.** A meeting's content is unpublished project text. Gemini takes part only if you tick the permission for *that meeting*; the server refuses otherwise and nothing is created or sent. It is kept in the minutes, ends with the meeting, and does not change the global `allow_unpublished_to_free_tier` switch. Before **every** request to the Gemini API (model list and each model tried) the stop state is checked, so after a stop the same text is not retried on another model.
+- **Kiro Crew first, one exception.** Development work and progress stay on Kiro Crew's own features. Because Kiro Crew 0.12.2 gives an app no way to choose a slot's backend, **brainstorming only** may start `claude` and `codex` directly (`backend/external_ai.py`). They get text only: tools, MCP, web search, hooks and file writes are off, the environment contains no API keys, and a run that tries a tool is killed. The screen and the minutes label them "Kiro Crew 外で実行". At most 2 run at once, and only with at least 1.5 GB of free memory.
+- **A stop reaches everything those CLIs started.** On Windows each CLI is created suspended, put in its own Job Object, then resumed, so a stop ends it and every child, even one being created at that moment. If the job cannot be set up, the CLI is not started.
+- **Records.** Every outside run is recorded (CLI, model, time, outcome; the prompt only as a SHA-256 hash). Round 0 of a meeting asks each AI to name itself; a self-introduction that does not match the AI actually called is flagged in the minutes (it never changes which AI is recorded as having answered).
+- **Gemini and spending notes.** The key is read from the Kiro Crew vault at call time and sent only in a header. Ghost Foreman cannot see whether a key's Google project has billing enabled; use a free-tier key.
 
-## Gemini (free tier) and spending safety
+---
 
-Ghost Foreman can use the official Gemini API for low-cost work (news summaries, and question triage if you allow it).
-
-- Register your key in Kiro Crew: **Settings → Secrets → `GEMINI_API_KEY`**. The key is read from the vault at call time, sent only in the `x-goog-api-key` header, and never written to logs, URLs or the repository.
-- Use a key from **Google AI Studio's free tier (a project without billing)**. Ghost Foreman cannot detect whether a key's project has billing enabled, and Google charges such projects.
-- Order of providers: Gemini free tier → a real Kiro Crew session → hold. When the free tier is exhausted (HTTP 429) Gemini is paused for the retry delay and the next provider is used. **There is no code path to a metered paid API.**
-- Privacy switch: unpublished project text (questions, rules) is **not** sent to the Gemini free tier unless you turn on `allow_unpublished_to_free_tier` (`POST /api/apps/ghost-foreman/mode`). Free-tier inputs may be used by the provider. Public pages (news) are always allowed.
-- `GET /api/apps/ghost-foreman/usage` shows calls and measured tokens per provider. Kiro session usage is not exposed by the host and is shown as unknown.
-
-Tests for the failure paths (quota exhaustion, overloaded model, rejected key, SSRF guard) use an injected transport: `python -m unittest discover -s tests -v`.
-
-
-## AI meeting participants (Kiro, Claude Code, Codex)
-
-Each meeting participant can be **Kiro**, **Claude Code**, **Codex** or **Gemini**, chosen per participant in the meeting form.
-
-- **Gemini** is the official Gemini API free tier, called by Ghost Foreman (labelled 「Kiro Crew 外で実行（Gemini API 無料枠）」). The API returns text only. A meeting's content is unpublished project text, so **Gemini takes part only if you allow it for that meeting**: the form shows a checkbox when Gemini is chosen, and the server refuses a meeting with Gemini unless the request carries `allow_unpublished_to_gemini: true`. Nothing is created or sent when it is refused. The permission is kept in the minutes (`gemini_consent`), ends with the meeting, and does not change the global `allow_unpublished_to_free_tier` switch. If the free tier is exhausted or the key is rejected, Gemini has no answer: no other AI answers in its place and there is no paid API. A stop is checked before every request to the Gemini API (the model list and each model tried), so after a stop Gemini does not retry the same text on another model; an answer to a request already in flight is discarded.
-
-- **Kiro** runs inside Kiro Crew, in a Ghost Foreman managed slot on the app's `meeting-participant` agent. It is labelled 「Kiro Crew で実行」. Kiro Crew starts a Kiro session only after its `kirocrew-guide` and `kirocrew-mate` servers each advertise a tool, so this agent sees one read-only tool on each (`search_docs`, `find_capabilities`) and nothing else. Ghost Foreman does not auto-approve them, so any call waits for you.
-- **Claude Code and Codex run outside Kiro Crew.** Kiro Crew 0.12.2 gives an app no way to choose the backend of its own slots, so for brainstorming only, Ghost Foreman starts the `claude` and `codex` CLIs directly (`backend/external_ai.py`). The UI and the minutes label them 「Kiro Crew 外で実行」. All other work still goes through Kiro Crew.
-- Participants outside Kiro Crew handle text only. Tools, MCP servers, web search, hooks and file writes are disabled on the command line. A run that tries to use a tool or asks for an API key is killed. The CLI gets an allowlisted environment with no API keys.
-- Ghost Foreman's emergency stop kills every running CLI. On Windows each CLI is created suspended, put in its own Job Object and only then resumed (`backend/winjob.py`), so a stop ends the CLI and every process it started, even one being created at that moment. When a CLI exits, anything it left running is ended too. If the job cannot be set up, the CLI is not started. Each run is recorded in `external_runs`, with the prompt stored only as a SHA-256 hash. `GET /api/apps/ghost-foreman/meetings/external-runs` lists the runs, and the Settings tab shows them. Cost is shown as unconfirmed (未確認), never as $0.
-- Limits: 2 CLI runs at a time, and a run only starts when the PC has at least 1.5 GB of free memory (RAM).
-- Round 0 asks every participant to say which AI it is. The answer and the reported model are kept in the minutes (`participants_detail`).
-
-**Requirements on the PC:** install the CLIs and sign in with your subscription (not an API key):
-- Claude Code: run `claude` in a terminal, then `/login`.
-- Codex: run `codex login` (ChatGPT sign-in).
-
-`GET /api/apps/ghost-foreman/meetings/harnesses?refresh=1` shows whether each one can run right now.
-
-
-## Remote access from an iPhone (Tailscale Serve)
+## 6. Remote access from an iPhone (Tailscale Serve)
 
 The Gateway listens on `127.0.0.1` only. To reach it from a phone **without opening a port to the internet**, publish it inside your private tailnet with Tailscale Serve (not Funnel). Only devices signed in to your Tailscale account can connect, and the dashboard still requires its access token.
 
 **PC (one time)**
 1. Install Tailscale and sign in: `winget install --id Tailscale.Tailscale -e`.
-2. In the Tailscale admin console enable **MagicDNS** and **HTTPS Certificates** (DNS page), and enable **Serve** for this node (the CLI prints a link the first time).
-3. Tell the Gateway to accept its own tailnet name (it otherwise answers `403 Host header not allowed`): `kirocrew config set dashboard.tailscale.enabled true`, then `kirocrew restart`. Only this PC's MagicDNS name is added; the access token is still required.
-4. `tailscale serve --bg 5476` publishes `https://<pc-name>.<tailnet>.ts.net/` inside the tailnet. Check with `tailscale serve status` that it says *(tailnet only)* and that Funnel is off.
-5. `scripts\phone-link.ps1` copies (`kirocrew token` also prints the tailnet link on its second line). With `-Qr` it shows a QR code in a window on the PC instead (`pip install segno`; nothing is written to disk; the window closes by itself) a sign-in link for the iPhone to the clipboard (it is never printed). The link contains an access token (20 h by default, `-Ttl 2h` for shorter): send it only to your own phone.
+2. In the Tailscale admin console enable **MagicDNS** and **HTTPS Certificates**, and enable **Serve** for this node (the CLI prints a link the first time).
+3. Let the Gateway accept its own tailnet name (otherwise `403 Host header not allowed`): `kirocrew config set dashboard.tailscale.enabled true`, then `kirocrew restart`.
+4. `tailscale serve --bg 5476` publishes `https://<pc-name>.<tailnet>.ts.net/` inside the tailnet. Check with `tailscale serve status` that it says *(tailnet only)*. Run it again after a PC reboot.
+5. `scripts\phone-link.ps1` copies a sign-in link for the iPhone to the clipboard (it is never printed). With `-Qr` it shows a QR code in a window on the PC instead (`pip install segno`; nothing is written to disk; the window closes by itself). The link contains an access token (20 h by default, `-Ttl 1h` for shorter): send it only to your own phone.
 
 **iPhone (Ghost Foreman as its own Home Screen app)**
-1. Install the Tailscale app and sign in with the same account; keep the VPN switch on.
-2. On the PC run `scripts\phone-link.ps1 -Qr -Ttl 1h` and scan the QR code with the iPhone camera. It opens Ghost Foreman's own page (`/api/apps/ghost-foreman/m/`), not the Kiro Crew dashboard.
-3. In Safari: Share → **Add to Home Screen** → Add, then open the new Ghost Foreman icon right away (the link expires after `-Ttl`).
-4. In the app: **⚙️ 設定・費用 → 通知をオンにする**, then **テスト通知を送る**.
+1. Install the Tailscale app, sign in with the same account, keep the VPN switch on.
+2. On the PC run `scripts\phone-link.ps1 -Qr -Ttl 1h` and scan the QR code. It opens Ghost Foreman's own page (`/api/apps/ghost-foreman/m/`), not the Kiro Crew dashboard.
+3. In Safari: Share → **Add to Home Screen**, then open the new icon right away (the link expires after `-Ttl`).
+4. In the app: **⚙️ 詳細・設定 → 通知・送信の設定 → 通知をオンにする**, then **テスト通知を送る**.
 
-How it stays signed in: iOS gives a Home Screen app its own storage, separate from Safari, so the app signs in once with the link it was added from and then renews itself with the Gateway's 30-day refresh cookie. A small service worker (scope `/api/apps/ghost-foreman/m/`) keeps the page so it can do that renewal after the 20-hour access cookie has expired; it caches only the page and its two modules, never API data. If everything has expired the app shows a sign-in screen where a new link can be pasted. React is bundled in `ui/m/vendor/react.mjs` (rebuild: `ui/m/vendor/build.mjs`); no CDN is used. The browser end-to-end test is `tests/ui/phone_e2e.mjs`.
+The app signs in once with the link it was added from and then renews itself with the Gateway's 30-day refresh cookie. A small service worker (scope `/api/apps/ghost-foreman/m/`) keeps only the page and its two modules so it can renew after the 20-hour access cookie expires; it never caches API data. React is bundled in `ui/m/vendor/react.mjs` (rebuild: `ui/m/vendor/build.mjs`); no CDN is used. The browser end-to-end test is `tests/ui/phone_e2e.mjs`. Never run `tailscale funnel` for this app.
 
-Notes: push subscriptions belong to the address they were created on, so subscribe again after switching to the `ts.net` address. `tailscale serve reset` removes the publication. Never run `tailscale funnel` for this app.
+---
+
+## 7. Repository structure
+
+```text
+ghost-foreman/
+├── app.json                      # Kiro Crew app manifest (permissions, agents, MCP server)
+├── .kiro/                        # specs/ and steering/ (Kiroween requires this folder)
+├── agents/                       # ghost-foreman-agent.json, meeting-participant.json
+├── skills/foreman-protocol/      # how an AI should consult Ghost Foreman
+├── backend/
+│   ├── supervisor.py             # proxy decisions, reverse-probe, policies, adoption
+│   ├── meeting.py                # AI meetings (four kinds of AI)
+│   ├── external_ai.py, winjob.py # Claude Code / Codex outside Kiro Crew; Job Objects
+│   ├── gemini.py, llm_router.py  # Gemini free tier, router, free-tier guard
+│   ├── halt.py                   # emergency stop (human-only resume)
+│   ├── crew_adapter.py, live_gateway.py  # managed slots on the real Gateway
+│   ├── notifier.py, news.py, store.py, routes.py, hooks.py, mcp_server.py
+├── ui/dist/index.mjs             # the app screen (Kiro Crew dashboard)
+├── ui/m/                         # the iPhone page (manifest, service worker, bundled React)
+├── scripts/                      # phone-link.ps1, QR window, icons
+├── tests/                        # unit tests; tests/ui = screen and phone end-to-end tests
+├── dev_server.py, ui/index.html  # simulated standalone demo (older screen)
+└── verify_phase1_and_2.py        # acceptance suite
+```
+
+---
+
+## 8. License
+MIT License — see [LICENSE](./LICENSE).
