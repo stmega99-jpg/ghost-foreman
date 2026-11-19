@@ -52,6 +52,10 @@ class GeminiUnavailable(GeminiError):
     """All candidate models failed with transient errors."""
 
 
+class GeminiStopped(GeminiError):
+    """The caller's stop check said stop: no (further) request was sent."""
+
+
 @dataclass
 class GeminiResult:
     text: str
@@ -128,13 +132,19 @@ class GeminiClient:
         except Exception:  # noqa: BLE001
             return False
 
-    def _call(self, method: str, path: str, body: Optional[Dict[str, Any]], key: str) -> Tuple[int, Dict[str, Any]]:
+    def _call(self, method: str, path: str, body: Optional[Dict[str, Any]], key: str,
+              should_stop: Optional[Callable[[], bool]] = None) -> Tuple[int, Dict[str, Any]]:
+        # Checked before EVERY request, so a stop that lands while one model is answering means the next model (or
+        # the model list) is never asked. A request already in flight cannot be recalled; its answer is the
+        # caller's to discard.
+        if should_stop is not None and should_stop():
+            raise GeminiStopped("緊急停止中のため Gemini API に送信しませんでした")
         headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
         return self._transport(method, f"{BASE_URL}{path}", headers, body, REQUEST_TIMEOUT_SECS)
 
-    def _candidates(self, key: str) -> List[str]:
+    def _candidates(self, key: str, should_stop: Optional[Callable[[], bool]] = None) -> List[str]:
         if not self._models or time.time() - self._models_ts > MODEL_LIST_TTL_SECS:
-            status, data = self._call("GET", "/models?pageSize=200", None, key)
+            status, data = self._call("GET", "/models?pageSize=200", None, key, should_stop)
             if status == 200:
                 names = [m["name"].replace("models/", "") for m in data.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", [])]
                 self._models, self._models_ts = rank_models(names), time.time()
@@ -145,7 +155,10 @@ class GeminiClient:
         return self._models[:MAX_MODELS_PER_CALL]
 
     # -- main API ----------------------------------------------------------
-    def generate(self, prompt: str, system: str = "", json_mode: bool = False, max_output_tokens: int = 1024) -> GeminiResult:
+    def generate(self, prompt: str, system: str = "", json_mode: bool = False, max_output_tokens: int = 1024,
+                 should_stop: Optional[Callable[[], bool]] = None) -> GeminiResult:
+        """*should_stop* is asked before each request (model list and every model tried); when it returns True no
+        further request is sent and ``GeminiStopped`` is raised."""
         key = self._key_loader()
         if not key:
             raise GeminiNoKey("GEMINI_API_KEY is not registered in the Kiro Crew vault")
@@ -158,8 +171,8 @@ class GeminiClient:
         if json_mode:
             body["generationConfig"]["responseMimeType"] = "application/json"
         last = "no candidate model"
-        for model in self._candidates(key):
-            status, data = self._call("POST", f"/models/{model}:generateContent", body, key)
+        for model in self._candidates(key, should_stop):
+            status, data = self._call("POST", f"/models/{model}:generateContent", body, key, should_stop)
             if status == 200:
                 cand = (data.get("candidates") or [{}])[0]
                 text = "".join(p.get("text", "") for p in (cand.get("content") or {}).get("parts", []))

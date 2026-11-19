@@ -27,8 +27,8 @@ class ForemanSupervisor:
         adapter.stop_callbacks.append(
             lambda scope, target: self.external.kill_all(None if scope == "all" else target) if scope in ("all", "project") else []
         )
-        self.meetings = MeetingEngine(store, adapter, external=self.external)
         self.llm = LlmRouter(store, adapter)
+        self.meetings = MeetingEngine(store, adapter, external=self.external, gemini=self.llm)
         self.news = NewsCollector(store, self.llm)
         self.notifier = Notifier(store, adapter)
 
@@ -857,11 +857,13 @@ class ForemanSupervisor:
         topic: str,
         participants: Optional[List[Any]] = None,
         synthesizer_harness: str = "",
+        allow_unpublished_to_gemini: bool = False,
     ) -> Dict[str, Any]:
         """Run a structured AI Meeting: Step 1 Independent Ideation -> Step 2 Mutual Critique -> Step 3 Ghost Synthesis."""
         if self.adapter.live is not None:
             # Real meeting: participants are live agent slots; `participants` (optional) are their perspectives.
-            return self.meetings.start(project_id, topic, participants, synthesizer_harness)
+            return self.meetings.start(project_id, topic, participants, synthesizer_harness,
+                                       allow_unpublished_to_gemini=allow_unpublished_to_gemini)
         # --- SIMULATED fallback (no Gateway bound): canned text, labelled as such ---
         chosen = [
             str(p.get("perspective", "")) if isinstance(p, dict) else str(p)
