@@ -1,6 +1,10 @@
 // Ghost Foreman — Kiro Crew App UI (`ui/dist/index.mjs`, resolved relative to `<app_root>/ui/`).
 // This is the screen the Gateway actually serves (index.html is only used by the local dev server).
 // React renders text as text, so AI-written content is never interpreted as HTML.
+//
+// Layout: a HOME screen that starts from what the person wants to do (answer an AI, consult the AIs, see what the AIs
+// are doing, look up news, read the rules). Technical settings, costs and run records live on the "詳細・設定" screen.
+// The emergency stop button is in the header of every screen.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppApi, useAppEvents } from "@kirocrew/app-sdk";
 
@@ -9,35 +13,64 @@ const BASE = "/api/apps/ghost-foreman";
 
 const C = { bg: "#0d0b18", card: "#17122a", border: "#2e1f47", text: "#f3e8ff", mute: "#a89bc4", accent: "#a78bfa", ok: "#34d399", warn: "#fbbf24", bad: "#f87171" };
 const S = {
-  page: { background: C.bg, color: C.text, minHeight: "100vh", padding: 16, fontFamily: "system-ui, sans-serif", fontSize: 14, lineHeight: 1.5 },
-  card: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, marginBottom: 12 },
+  page: { background: C.bg, color: C.text, minHeight: "100vh", padding: 16, fontFamily: "system-ui, sans-serif", fontSize: 15, lineHeight: 1.6 },
+  wrap: { maxWidth: 760, margin: "0 auto" },
+  card: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 12 },
   row: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" },
-  btn: { background: "#3b2a66", color: C.text, border: `1px solid ${C.accent}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 14 },
-  btnOk: { background: "#064e3b", color: C.text, border: `1px solid ${C.ok}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 14 },
-  btnBad: { background: "#4c0519", color: C.text, border: `1px solid ${C.bad}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 14 },
-  input: { background: "#0d0b18", color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: 8, fontSize: 14, minWidth: 0, flex: 1 },
-  log: { background: "#0d0b18", border: `1px solid ${C.border}`, borderRadius: 8, padding: 8, margin: "6px 0", whiteSpace: "pre-wrap", fontSize: 13 },
-  mute: { color: C.mute, fontSize: 12 },
+  btn: { background: "#3b2a66", color: C.text, border: `1px solid ${C.accent}`, borderRadius: 10, padding: "10px 14px", minHeight: 44, cursor: "pointer", fontSize: 15 },
+  btnOk: { background: "#064e3b", color: C.text, border: `1px solid ${C.ok}`, borderRadius: 10, padding: "10px 14px", minHeight: 44, cursor: "pointer", fontSize: 15 },
+  btnBad: { background: "#4c0519", color: C.text, border: `1px solid ${C.bad}`, borderRadius: 10, padding: "10px 14px", minHeight: 44, cursor: "pointer", fontSize: 15 },
+  big: { fontSize: 17, padding: "14px 18px", minHeight: 52 },
+  input: { background: "#0d0b18", color: C.text, border: `1px solid ${C.border}`, borderRadius: 10, padding: 10, fontSize: 15, minWidth: 0, flex: 1 },
+  log: { background: "#0d0b18", border: `1px solid ${C.border}`, borderRadius: 10, padding: 10, margin: "6px 0", whiteSpace: "pre-wrap", fontSize: 14 },
+  mute: { color: C.mute, fontSize: 13 },
+  h2: { margin: "4px 0 10px", fontSize: 20 },
+  h3: { margin: "0 0 8px", fontSize: 17 },
 };
 
 const STATUS = {
   needs_human: ["判断待ち", C.warn],
-  probing: ["担当AIへ逆質問中…", C.accent],
+  probing: ["担当AIへ確認中…", C.accent],
   needs_human_approval: ["ツール承認待ち", C.warn],
-  held_spec_violation: ["仕様変更を保留", C.bad],
+  held_spec_violation: ["仕様変更のため保留", C.bad],
   held_emergency_stop: ["緊急停止中に受信（再開後に判断）", C.bad],
-  auto_resolved: ["自動回答済み", C.ok],
+  auto_resolved: ["自動で回答済み", C.ok],
   human_resolved: ["回答済み", C.ok],
-  batch_resolved: ["一括回答済み", C.ok],
+  batch_resolved: ["まとめて回答済み", C.ok],
 };
+const SLOT_STATUS = { working: "作業中", idle: "待機中", stopped: "停止中", waiting_human: "あなたの判断待ち", blocked: "待機中（理由あり）" };
+const MEETING_STATUS = {
+  running: ["相談中…（数分かかります）", C.accent],
+  awaiting_human_adoption: ["結果が出ました。選んでください", C.warn],
+  failed: ["うまくいきませんでした", C.bad],
+  adopted_and_scheduled: ["採用して作業を頼みました", C.ok],
+  saved_to_ideas: ["アイデア帳に保存しました", C.ok],
+};
+const SCOPE = { global: "すべての案件", project: "この案件", item: "この件だけ" };
 
 function Badge({ text, color }) {
   return h("span", { style: { border: `1px solid ${color || C.border}`, color: color || C.mute, borderRadius: 999, padding: "1px 8px", fontSize: 12, whiteSpace: "nowrap" } }, text);
 }
 const isPending = (q) => ["needs_human", "needs_human_approval", "held_spec_violation"].includes(q.status);
+const projectName = (d, id) => ((d.projects || []).find((p) => p.id === id) || {}).name || id;
 
-// ------------------------------------------------------------------ inbox
-function QuestionCard({ q, call, highlight }) {
+// ------------------------------------------------------------------ small building blocks
+function BackBar({ title, onBack }) {
+  return h("div", { style: { ...S.row, marginBottom: 8 } },
+    h("button", { style: S.btn, onClick: onBack }, "← ホームへ戻る"),
+    h("h2", { style: { ...S.h2, margin: 0 } }, title));
+}
+
+function Tile({ icon, title, desc, badge, onClick, accent }) {
+  return h("button", { onClick, style: { ...S.card, display: "block", width: "100%", textAlign: "left", cursor: "pointer", color: C.text, marginBottom: 10, ...(accent ? { borderColor: C.warn } : {}) } },
+    h("div", { style: { ...S.row, justifyContent: "space-between" } },
+      h("span", { style: { fontSize: 18, fontWeight: 600 } }, `${icon} ${title}`),
+      badge ? h(Badge, { text: badge, color: C.warn }) : null),
+    h("div", { style: S.mute }, desc));
+}
+
+// ------------------------------------------------------------------ answer the AIs' questions
+function QuestionCard({ q, d, call, highlight }) {
   const [text, setText] = useState("");
   const [follow, setFollow] = useState("");
   const [batch, setBatch] = useState(false);
@@ -58,10 +91,10 @@ function QuestionCard({ q, call, highlight }) {
   return h(
     "div",
     { ref, style: { ...S.card, ...(highlight ? { borderColor: C.accent, boxShadow: `0 0 0 2px ${C.accent}55` } : {}) } },
-    h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: `${q.project_id} / ${q.slot_id}` }), h(Badge, { text: label, color })),
+    h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: projectName(d, q.project_id) }), h(Badge, { text: label, color })),
     h("h3", { style: { margin: "8px 0" } }, "AIからの確認: " + q.raw_question),
     q.context_summary ? h("p", { style: { whiteSpace: "pre-wrap" } }, q.context_summary) : null,
-    q.recommendation ? h("p", { style: { color: C.accent } }, "👻 幽霊の推奨: " + q.recommendation + " — " + (q.recommendation_reason || "")) : null,
+    q.recommendation ? h("p", { style: { color: C.accent } }, "👻 幽霊のおすすめ: " + q.recommendation + " — " + (q.recommendation_reason || "")) : null,
     ...(q.probe_history || []).map((p, i) => h("div", { key: "p" + i, style: S.log }, h("strong", null, `[${p.role}] `), p.text)),
     ...(q.options || []).map((o) =>
       h(
@@ -74,28 +107,28 @@ function QuestionCard({ q, call, highlight }) {
           ? h(
               "div",
               { style: { ...S.row, marginTop: 6 } },
-              h("button", { style: S.btn, onClick: () => resolve(o.label + " を採用", "one_time") }, "今回のみこの案"),
-              h("button", { style: S.btnOk, onClick: () => resolve(o.label + " を標準規約として採用", "permanent_policy") }, "🧠 恒久ルールにして回答")
+              h("button", { style: S.btn, onClick: () => resolve(o.label + " を採用", "one_time") }, "今回だけ、この案にする"),
+              h("button", { style: S.btnOk, onClick: () => resolve(o.label + " を標準規約として採用", "permanent_policy") }, "🧠 これからもこの方針にする（恒久ルールにして回答）")
             )
           : null
       )
     ),
-    q.final_answer ? h("div", { style: { ...S.log, borderColor: C.ok } }, h("strong", null, "[送信済み回答] "), q.final_answer) : null,
+    q.final_answer ? h("div", { style: { ...S.log, borderColor: C.ok } }, h("strong", null, "[AIに送った回答] "), q.final_answer) : null,
     isPending(q)
       ? h(
           "div",
           { style: { marginTop: 10, borderTop: `1px solid ${C.border}`, paddingTop: 10 } },
-          h("div", { style: S.mute }, "自由に回答する（選択肢以外でもOK）"),
-          h("textarea", { style: { ...S.input, width: "100%", minHeight: 60, boxSizing: "border-box" }, value: text, onChange: (e) => setText(e.target.value), placeholder: "回答を入力…" }),
+          h("div", { style: S.mute }, "自分の言葉で答える（選択肢以外でもOK）"),
+          h("textarea", { style: { ...S.input, width: "100%", minHeight: 70, boxSizing: "border-box" }, value: text, onChange: (e) => setText(e.target.value), placeholder: "回答を入力…" }),
           h(
             "div",
             { style: { ...S.row, marginTop: 6 } },
-            h("button", { style: S.btn, disabled: !text.trim(), onClick: () => resolve(text.trim(), "one_time") }, "今回のみ回答"),
-            h("button", { style: S.btnOk, disabled: !text.trim(), onClick: () => resolve(text.trim(), "permanent_policy") }, "🧠 恒久ルールにして回答"),
-            h("label", { style: S.mute }, h("input", { type: "checkbox", checked: batch, onChange: (e) => setBatch(e.target.checked) }), " 同一案件の同種確認にも一括適用")
+            h("button", { style: S.btn, disabled: !text.trim(), onClick: () => resolve(text.trim(), "one_time") }, "今回だけの回答にする"),
+            h("button", { style: S.btnOk, disabled: !text.trim(), onClick: () => resolve(text.trim(), "permanent_policy") }, "🧠 これからもこの方針にする（恒久ルールにして回答）")
           ),
+          h("label", { style: { ...S.mute, display: "block", marginTop: 6 } }, h("input", { type: "checkbox", checked: batch, onChange: (e) => setBatch(e.target.checked) }), " 同じ案件の似た質問にも、まとめて適用する"),
           h("div", { style: { ...S.row, marginTop: 8 } },
-            h("input", { style: S.input, value: follow, onChange: (e) => setFollow(e.target.value), placeholder: "質問で返す（例: JSONとSQLiteの違いは？）" }),
+            h("input", { style: S.input, value: follow, onChange: (e) => setFollow(e.target.value), placeholder: "分からないときは質問で返す（例: JSONとSQLiteの違いは？）" }),
             h("button", { style: S.btn, disabled: !follow.trim(), onClick: () => call("POST", "/questions/inquire", { question_id: q.id, human_inquiry: follow.trim(), re_probe_agent: true }).then(() => setFollow("")) }, "💬 質問で返す")
           )
         )
@@ -105,91 +138,201 @@ function QuestionCard({ q, call, highlight }) {
 
 function Inbox({ d, call, focusQ }) {
   const sorted = [...d.questions].sort((a, b) => Number(isPending(b)) - Number(isPending(a)) || String(b.created_at).localeCompare(String(a.created_at)));
-  if (!sorted.length) return h("div", { style: S.card }, "受信した確認はまだありません。管理スロットのAIが foreman_ask で質問すると、ここに表示されます。");
-  return h("div", null, ...sorted.map((q) => h(QuestionCard, { key: q.id, q, call, highlight: focusQ === q.id })));
+  const pending = sorted.filter(isPending).length;
+  return h("div", null,
+    h("div", { style: S.mute }, pending ? `あなたの判断を待っている確認が ${pending} 件あります。` : "いま、あなたの判断を待っている確認はありません。"),
+    sorted.length ? null : h("div", { style: S.card }, "AIからの確認はまだ届いていません。AIが迷ったときに、ここに表示されます。"),
+    ...sorted.map((q) => h(QuestionCard, { key: q.id, q, d, call, highlight: focusQ === q.id })));
 }
 
-// ------------------------------------------------------------------ slots
+// ------------------------------------------------------------------ see what the AIs are doing
 const slotHalted = (d, s) => !!(d.halt && (d.halt.all || (d.halt.projects || []).includes(s.project_id) || (d.halt.slots || []).includes(s.id)));
 
-function Slots({ d, call }) {
+function SlotCard({ d, s, call, technical }) {
   return h(
     "div",
-    null,
-    h("div", { style: { ...S.card, ...S.mute } }, "「実接続」は Kiro Crew Gateway 上の本物のセッションです。「模擬」はデモ用のサンプルで、実在のAIではありません。"),
-    ...d.slots.map((s) =>
-      h(
-        "div",
-        { key: s.id, style: S.card },
-        h("div", { style: { ...S.row, justifyContent: "space-between" } },
-          h("strong", null, `${s.id} ${s.name}`),
-          h("span", { style: S.row }, h(Badge, { text: s.is_live ? "実接続" : "模擬", color: s.is_live ? C.ok : C.warn }), slotHalted(d, s) ? h(Badge, { text: "停止中（人間の許可待ち）", color: C.bad }) : null, h(Badge, { text: s.status }))
-        ),
-        h("div", null, `案件 ${s.project_id} / 役割 ${s.role} / ${s.backend}`),
-        h("div", null, "現在の仕事: " + s.current_task),
-        s.waiting_reason ? h("div", { style: { color: C.warn } }, "待機理由: " + s.waiting_reason) : null,
-        s.next_task ? h("div", { style: S.mute }, "次の予約: " + s.next_task) : null,
-        h("div", { style: { ...S.row, marginTop: 8 } },
-          h("button", { style: S.btnBad, onClick: () => call("POST", "/stop", { scope: "slot", target_id: s.id }) }, "⏹ 停止"),
-          d.halt && (d.halt.slots || []).includes(s.id) ? h("button", { style: S.btnOk, onClick: () => { if (window.confirm(s.name + " の停止を解除し、再開を許可しますか？\n（解除しても自動では作業を始めません）")) call("POST", "/stop", { scope: "resume_slot", target_id: s.id }); } }, "▶ この停止を解除") : null)
-      )
-    )
+    { style: S.card },
+    h("div", { style: { ...S.row, justifyContent: "space-between" } },
+      h("strong", null, technical ? `${s.id} ${s.name}` : s.name),
+      h("span", { style: S.row },
+        h(Badge, { text: s.is_live ? "本物のAI（実接続）" : "デモ用の見本（模擬）", color: s.is_live ? C.ok : C.warn }),
+        slotHalted(d, s) ? h(Badge, { text: "停止中（人間の許可待ち）", color: C.bad }) : null,
+        h(Badge, { text: SLOT_STATUS[s.status] || s.status }))),
+    h("div", null, `${projectName(d, s.project_id)} ／ 役割: ${s.role}${technical ? " ／ " + s.backend : ""}`),
+    h("div", null, "いまの仕事: " + s.current_task),
+    s.waiting_reason ? h("div", { style: { color: C.warn } }, "待っている理由: " + s.waiting_reason) : null,
+    s.next_task ? h("div", { style: S.mute }, "次の予定: " + s.next_task) : null,
+    h("div", { style: { ...S.row, marginTop: 8 } },
+      h("button", { style: S.btnBad, onClick: () => call("POST", "/stop", { scope: "slot", target_id: s.id }) }, "⏹ 停止"),
+      d.halt && (d.halt.slots || []).includes(s.id) ? h("button", { style: S.btnOk, onClick: () => { if (window.confirm(s.name + " の停止を解除し、再開を許可しますか？\n（解除しても自動では作業を始めません）")) call("POST", "/stop", { scope: "resume_slot", target_id: s.id }); } }, "▶ この停止を解除") : null)
   );
 }
 
-// ------------------------------------------------------------------ meetings
-const DEFAULT_PARTICIPANTS = [
-  { perspective: "設計・世界観との整合性の視点", harness: "kiro" },
-  { perspective: "実装工数・リスクの視点", harness: "kiro" },
-  { perspective: "プレイヤー体験・面白さの視点", harness: "kiro" },
-];
+function AiWatch({ d, call, go }) {
+  const live = d.slots.filter((s) => s.is_live);
+  const demo = d.slots.length - live.length;
+  return h("div", null,
+    live.length ? null : h("div", { style: S.card }, "いま、Ghost Foreman が見ている本物のAIの作業はありません。"),
+    ...live.map((s) => h(SlotCard, { key: s.id, d, s, call })),
+    demo ? h("div", { style: { ...S.card, ...S.mute } }, `デモ用の見本が ${demo} 件あります（実在するAIではありません）。`, " ", h("button", { style: S.btn, onClick: () => go("details:slots") }, "詳細で見る")) : null);
+}
 
-function Meetings({ d, call }) {
+// ------------------------------------------------------------------ consult the AIs (meetings)
+const PERSPECTIVES = [
+  "設計・世界観との整合性の視点",
+  "実装工数・リスクの視点",
+  "プレイヤー体験・面白さの視点",
+  "安全性・間違いにくさの視点",
+  "他のアプリとの比較・市場の視点",
+];
+const AI_DESC = {
+  kiro: "Kiro Crew の中で動くAIです。",
+  claude: "Anthropic のAIです。パソコンから直接起動します（Kiro Crew の外）。",
+  codex: "OpenAI のAIです。パソコンから直接起動します（Kiro Crew の外）。",
+  gemini: "Google のAIです。無料枠を使います（Kiro Crew の外）。この会議の内容を送る許可が必要です。",
+};
+const WHERE = { external_cli: "（Kiro Crew 外で実行）", gemini_api: "（Kiro Crew 外・Gemini API 無料枠）" };
+
+function MeetingCard({ m, d, call }) {
+  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState("");
+  const workers = d.slots.filter((s) => s.is_live && !["会議参加者", "議事整理", "判定係"].includes(s.role));
+  const chosen = target || (workers.find((w) => w.project_id === m.project_id) || workers[0] || {}).id || "";
+  const sm = m.summary || {};
+  const live = sm.live !== false;
+  const [stLabel, stColor] = MEETING_STATUS[m.status] || [m.status, C.mute];
+  const people = sm.participants_detail ? [...sm.participants_detail, ...(sm.synthesizer ? [sm.synthesizer] : [])] : [];
+  return h("div", { style: S.card },
+    h("div", { style: { ...S.row, justifyContent: "space-between" } },
+      h(Badge, { text: projectName(d, m.project_id) }),
+      h("span", { style: S.row }, live ? null : h(Badge, { text: "デモ用の見本（模擬）", color: C.warn }), h(Badge, { text: stLabel, color: stColor }))),
+    h("h3", { style: { margin: "8px 0" } }, "相談: " + m.topic),
+    h("div", { style: S.mute }, "参加したAI: " + m.participants.join(" ／ ")),
+    sm.outside_kiro_crew ? h("div", { style: { color: C.warn, fontSize: 13, marginTop: 4 } }, "この相談には、Kiro Crew の外で動いたAI（Claude Code・Codex・Gemini。道具は使わず、文章だけ）が含まれます。") : null,
+    ...people.filter((p) => p.self_report_check && p.self_report_check.status !== "ok")
+      .map((p, i) => h("div", { key: "sr" + i, style: { color: C.warn, fontSize: 13, marginTop: 2 } }, `⚠️ ${p.speaker ? p.speaker.split("（")[0] : (p.label || p.harness)}: ${p.self_report_check.note}`)),
+    (sm.gemini_consent && sm.gemini_consent.asked) ? h("div", { style: { color: C.warn, fontSize: 13, marginTop: 2 } },
+      sm.gemini_consent.allowed ? `Gemini 無料枠への送信: この会議だけ許可（${sm.gemini_consent.decided_at}）` : "Gemini 無料枠への送信: 許可なし") : null,
+    m.status === "failed" && sm.note ? h("div", { style: { ...S.log, borderColor: C.bad } }, sm.note) : null,
+    sm.consensus
+      ? h("div", { style: { ...S.log, borderColor: C.accent } },
+          h("strong", null, "👻 幽霊のまとめ"), h("div", null, sm.consensus),
+          sm.conflict_points ? h("div", { style: { color: C.warn, marginTop: 4 } }, "意見が分かれたところ: " + sm.conflict_points) : null,
+          sm.unresolved ? h("div", { style: { marginTop: 4 } }, "まだ決まっていないこと: " + sm.unresolved) : null)
+      : null,
+    m.status === "awaiting_human_adoption"
+      ? h("div", { style: { marginTop: 8 } },
+          h("div", { style: { fontWeight: 600, marginBottom: 4 } }, "どの案で進めますか？（相談の段階では、まだ何も作りません）"),
+          h("div", { style: S.row },
+            h("span", { style: S.mute }, "作業を頼む相手:"),
+            h("select", { style: { ...S.input, flex: "0 0 auto" }, value: chosen, onChange: (e) => setTarget(e.target.value), "aria-label": "作業を頼むAI" },
+              ...(workers.length ? workers : [{ id: "", name: "（頼める本物のAIがいません）" }]).map((w) => h("option", { key: w.id || "none", value: w.id }, w.id ? `${w.name}（${w.role}）` : w.name)))),
+          ...(sm.options_for_human || []).map((o) =>
+            h("div", { key: o.id, style: { ...S.log, borderColor: C.accent } },
+              h("strong", null, o.label), o.detail ? h("div", null, o.detail) : null,
+              h("button", { style: { ...(o.id === "hold_as_idea" ? S.btn : S.btnOk), marginTop: 6 }, disabled: o.id !== "hold_as_idea" && !chosen,
+                onClick: () => call("POST", "/meetings/adopt", { meeting_id: m.id, option_id: o.id, target_slot_id: chosen }) },
+                o.id === "hold_as_idea" ? "いまは保存だけする" : "この案で進める（作業を頼む）"))))
+      : null,
+    m.rounds.length ? h("div", { style: { marginTop: 6 } },
+      h("button", { style: S.btn, onClick: () => setOpen(!open) }, open ? "▲ やりとりを閉じる" : "▼ AIたちのやりとりを見る"),
+      open ? h("div", null,
+        people.length ? h("div", { style: { ...S.row, marginTop: 6 } }, ...people.map((p, i) =>
+          h(Badge, { key: i, text: `${p.speaker ? p.speaker.split("（")[0] : "まとめ役"}: ${p.label || p.harness}・${p.runtime_label || ""}${p.model ? "・" + p.model : ""}${p.ran_on ? (p.verified ? "" : "（未確認）") : "（未実行）"}`, color: p.verified ? (p.runtime !== "kiro_crew" ? C.warn : C.ok) : C.mute }))) : null,
+        ...m.rounds.map((r, i) => h("div", { key: i, style: S.log }, h("strong", null, r.phase), ...r.entries.map((e, j) => h("div", { key: j, style: { marginTop: 6 } }, h("strong", null, e.speaker + ": "), e.proposal || e.critique)))),
+        sm.note && m.status !== "failed" ? h("div", { style: S.mute }, sm.note) : null) : null) : null);
+}
+
+function Consult({ d, call }) {
   const [topic, setTopic] = useState("");
-  const [parts, setParts] = useState(DEFAULT_PARTICIPANTS);
-  const [organiser, setOrganiser] = useState("kiro");
   const [harnesses, setHarnesses] = useState({ harnesses: [] });
   const [limits, setLimits] = useState({ min: 2, max: 5 });
-  const loadHarnesses = (refresh) => call("GET", "/meetings/harnesses" + (refresh ? "?refresh=1" : "")).then((r) => {
-      if (!r) return;
-      setHarnesses(r);
-      setLimits({ min: r.min_participants || 2, max: r.max_participants || 5 });
-    }).catch(() => {});
-  useEffect(() => {
-    call("GET", "/meetings/harnesses").then((r) => {
-      if (!r) return;
-      setHarnesses(r);
-      setLimits({ min: r.min_participants || 2, max: r.max_participants || 5 });
-    }).catch(() => {});
-  }, []);
+  const [picked, setPicked] = useState([]);
+  const [advanced, setAdvanced] = useState(false);
+  const [parts, setParts] = useState([]);
+  const [organiser, setOrganiser] = useState("kiro");
   const [geminiOk, setGeminiOk] = useState(false); // the human's answer for THIS meeting; reset after each start
-  const rows = harnesses.harnesses || [];
-  const whereLabel = { external_cli: "（Kiro Crew 外で実行）", gemini_api: "（Kiro Crew 外・Gemini API 無料枠）" };
-  const agentOptions = (rows.length ? rows : [{ id: "kiro", label: "Kiro", runtime: "kiro_crew", available: true }]).map((x) =>
-    h("option", { key: x.id, value: x.id, disabled: !x.available }, x.label + (whereLabel[x.runtime] || "") + (x.available ? "" : "　— 使えません: " + (x.reason || ""))));
-  const chosenIds = [...parts.map((p) => p.harness), organiser];
-  const runtimeOf = (id) => (rows.find((x) => x.id === id) || {}).runtime;
-  const outside = chosenIds.some((id) => runtimeOf(id) === "external_cli");
-  const usesGemini = chosenIds.includes("gemini");
-  const geminiRow = rows.find((x) => x.id === "gemini") || {};
-  const blocked = [...parts.map((p) => p.harness), organiser].filter((id) => rows.length && !(rows.find((x) => x.id === id) || {}).available);
-  const setPart = (i, key, value) => setParts(parts.map((p, j) => (j === i ? { ...p, [key]: value } : p)));
-  const validParts = parts.filter((p) => p.perspective.trim());
+  const [showFailed, setShowFailed] = useState(false);
   const [project, setProject] = useState(d.projects[0] ? d.projects[0].id : "proj-foreman");
-  const workers = d.slots.filter((s) => s.is_live && !["会議参加者", "議事整理", "判定係"].includes(s.role));
-  const [target, setTarget] = useState({});
-  return h(
-    "div",
-    null,
+  const seeded = useRef(false);
+  const apply = (r, first) => {
+    if (!r) return;
+    setHarnesses(r);
+    setLimits({ min: r.min_participants || 2, max: r.max_participants || 5 });
+    if (first && !seeded.current) {
+      seeded.current = true;
+      // Recommended: every AI that can run now, except Gemini (it needs a permission for each meeting).
+      setPicked((r.harnesses || []).filter((x) => x.available && x.id !== "gemini").map((x) => x.id));
+    }
+  };
+  const loadHarnesses = (refresh) => call("GET", "/meetings/harnesses" + (refresh ? "?refresh=1" : "")).then((r) => apply(r, false)).catch(() => {});
+  useEffect(() => { call("GET", "/meetings/harnesses").then((r) => apply(r, true)).catch(() => {}); }, []);
+
+  const rows = harnesses.harnesses || [];
+  const rowOf = (id) => rows.find((x) => x.id === id) || {};
+  const effective = advanced ? parts.filter((p) => p.perspective.trim()) : picked.map((id, i) => ({ perspective: PERSPECTIVES[i % PERSPECTIVES.length], harness: id }));
+  const chosenIds = [...effective.map((p) => p.harness), organiser];
+  const outside = chosenIds.some((id) => ["external_cli", "gemini_api"].includes(rowOf(id).runtime));
+  const usesGemini = chosenIds.includes("gemini");
+  const geminiRow = rowOf("gemini");
+  const blocked = chosenIds.filter((id) => rows.length && !rowOf(id).available);
+  const agentOptions = (rows.length ? rows : [{ id: "kiro", label: "Kiro", runtime: "kiro_crew", available: true }]).map((x) =>
+    h("option", { key: x.id, value: x.id, disabled: !x.available }, x.label + (WHERE[x.runtime] || "") + (x.available ? "" : "　— 使えません")));
+  const togglePick = (id) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+  const openAdvanced = () => {
+    if (!advanced) setParts(picked.map((id, i) => ({ perspective: PERSPECTIVES[i % PERSPECTIVES.length], harness: id })));
+    setAdvanced(!advanced);
+  };
+  const setPart = (i, key, value) => setParts(parts.map((p, j) => (j === i ? { ...p, [key]: value } : p)));
+
+  let why = "";
+  if (!topic.trim()) why = "相談したいことを入力してください。";
+  else if (effective.length < limits.min) why = `AIを ${limits.min} つ以上選んでください。`;
+  else if (effective.length > limits.max) why = `AIは ${limits.max} つまでです。`;
+  else if (blocked.length) why = "使えないAIが選ばれています。外すか、「再確認」してください。";
+  else if (usesGemini && !geminiOk) why = "Gemini を使うには、下の送信の許可にチェックしてください。";
+  const start = () => call("POST", "/meetings", {
+    project_id: project, topic: topic.trim(),
+    participants: effective.map((p) => ({ perspective: p.perspective.trim(), harness: p.harness })),
+    synthesizer_harness: organiser, allow_unpublished_to_gemini: usesGemini && geminiOk === true,
+  }).then(() => { setTopic(""); setGeminiOk(false); });
+
+  // Meetings that need the person (running, or waiting for a choice) stay in view. Finished ones and failed ones are folded.
+  const ok = d.meetings.filter((m) => ["running", "awaiting_human_adoption"].includes(m.status));
+  const past = d.meetings.filter((m) => !["running", "awaiting_human_adoption", "failed"].includes(m.status));
+  const failed = d.meetings.filter((m) => m.status === "failed");
+  const [showPast, setShowPast] = useState(false);
+  return h("div", null,
     h("div", { style: S.card },
-      h("h3", { style: { marginTop: 0 } }, "💬 AI会議を開く（実エージェントが独立案出し→相互批評→整理）"),
-      h("div", { style: S.row },
-        h("select", { style: { ...S.input, flex: "0 0 auto" }, value: project, onChange: (e) => setProject(e.target.value) }, ...d.projects.map((p) => h("option", { key: p.id, value: p.id }, p.name))),
-        h("input", { style: S.input, value: topic, onChange: (e) => setTopic(e.target.value), placeholder: "議題（例: セーブ時の安心感を与える演出）" }),
-        h("button", { style: S.btnOk, disabled: !topic.trim() || validParts.length < limits.min || blocked.length > 0 || (usesGemini && !geminiOk), onClick: () => call("POST", "/meetings", { project_id: project, topic: topic.trim(), participants: validParts.map((p) => ({ perspective: p.perspective.trim(), harness: p.harness })), synthesizer_harness: organiser, allow_unpublished_to_gemini: usesGemini && geminiOk === true }).then(() => { setTopic(""); setGeminiOk(false); }) }, "開催")
-      ),
-      h("div", { style: { marginTop: 10 } },
-        h("div", { style: S.mute }, `参加者（${limits.min}〜${limits.max}人）: それぞれの視点と、どのAIで参加するか`),
+      h("h3", { style: S.h3 }, "① 何を相談しますか？"),
+      h("div", { style: { ...S.row, marginBottom: 8 } },
+        h("span", { style: S.mute }, "どの案件？"),
+        h("select", { style: { ...S.input, flex: "0 0 auto" }, value: project, onChange: (e) => setProject(e.target.value), "aria-label": "案件" }, ...d.projects.map((p) => h("option", { key: p.id, value: p.id }, p.name)))),
+      h("input", { style: { ...S.input, width: "100%", boxSizing: "border-box", fontSize: 16 }, value: topic, onChange: (e) => setTopic(e.target.value), placeholder: "相談したいこと（例: セーブ時の安心感を与える演出）", "aria-label": "相談したいこと" })),
+    h("div", { style: S.card },
+      h("h3", { style: S.h3 }, "② 誰に相談しますか？（2つ以上選んでください）"),
+      ...rows.map((x) => h("label", { key: x.id, style: { display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0", borderTop: `1px solid ${C.border}`, opacity: x.available ? 1 : 0.6 } },
+        h("input", { type: "checkbox", style: { width: 22, height: 22, marginTop: 2 }, checked: picked.includes(x.id), disabled: !x.available || advanced, onChange: () => togglePick(x.id), "aria-label": `${x.label}に相談する` }),
+        h("span", { style: { flex: 1 } },
+          h("strong", null, x.label), " ", h(Badge, { text: x.available ? "使えます" : "いまは使えません", color: x.available ? C.ok : C.bad }),
+          h("div", { style: S.mute }, AI_DESC[x.id] || ""),
+          !x.available && x.reason ? h("div", { style: { color: C.warn, fontSize: 13 } }, x.reason) : null))),
+      h("div", { style: { ...S.row, marginTop: 6 } },
+        h("button", { style: S.btn, onClick: () => loadHarnesses(true) }, "↻ 使えるか再確認"),
+        h("span", { style: S.mute }, "はじめに、選んだAIへ参加確認を送ります。答えられないAIがいれば、始めずに理由をお知らせします。")),
+      outside ? h("div", { style: { ...S.log, borderColor: C.warn } },
+        "⚠️ Claude Code・Codex・Gemini は Kiro Crew の外で動きます（企画書で認めた、相談に限った例外です）。道具は使えず、文章のやり取りだけです。「全停止」でいつでも止められ、実行の記録は「詳細・設定」に残ります。各サービスの利用枠を使います。") : null,
+      usesGemini ? h("div", { style: { ...S.log, borderColor: C.warn } },
+        h("div", null, "Gemini は、使えないときに別のAIが代わりに答えることも、有料のAPIに切り替わることもありません。"),
+        h("label", { style: { display: "flex", gap: 8, alignItems: "flex-start", marginTop: 6 } },
+          h("input", { type: "checkbox", style: { width: 22, height: 22 }, checked: geminiOk, onChange: (e) => setGeminiOk(e.target.checked), "aria-label": "この会議の内容を Gemini 無料枠に送ることを許可する" }),
+          h("span", null, h("strong", null, "この会議の内容を Gemini 無料枠に送ることを許可する"), "（この会議だけ）")),
+        h("div", { style: S.mute }, geminiRow.consent_note || "議題・各AIの案など、未公開の制作情報を含みます。無料枠に送った内容は、Google がサービス改善に使う場合があります。"),
+        geminiOk ? null : h("div", { style: { color: C.warn, fontSize: 13 } }, "許可しない場合は、Gemini を外してください。")) : null),
+    h("div", { style: S.card },
+      h("button", { style: S.btn, onClick: openAdvanced }, advanced ? "▲ くわしい設定を閉じる" : "▼ くわしく設定する（任意）"),
+      advanced ? h("div", { style: { marginTop: 8 } },
+        h("div", { style: S.mute }, "参加者ごとに、どの視点で意見を出すか・どのAIにするかを決められます。同じAIを何人か入れることもできます。"),
         ...parts.map((p, i) => h("div", { key: i, style: { ...S.row, marginTop: 6 } },
           h("span", { style: { width: 20 } }, String.fromCharCode(65 + i)),
           h("input", { style: S.input, value: p.perspective, onChange: (e) => setPart(i, "perspective", e.target.value), placeholder: "視点（例: 実装工数・リスクの視点）", "aria-label": `参加者${String.fromCharCode(65 + i)}の視点` }),
@@ -197,75 +340,31 @@ function Meetings({ d, call }) {
           h("button", { style: S.btn, disabled: parts.length <= limits.min, onClick: () => setParts(parts.filter((_, j) => j !== i)), "aria-label": `参加者${String.fromCharCode(65 + i)}を外す` }, "−"))),
         h("div", { style: { ...S.row, marginTop: 6 } },
           h("button", { style: S.btn, disabled: parts.length >= limits.max, onClick: () => setParts([...parts, { perspective: "", harness: "kiro" }]) }, "＋ 参加者を追加"),
-          h("span", { style: S.mute }, "整理役（幽霊）:"),
-          h("select", { style: { ...S.input, flex: "0 0 auto" }, value: organiser, onChange: (e) => setOrganiser(e.target.value), "aria-label": "整理役のAI" }, ...agentOptions)),
-        h("div", { style: S.mute }, "開始前に全員へ参加確認を送り、答えられないAI（未ログインなど）がいれば会議を始めずに理由を表示します。各AIは道具（ファイル操作など）を持たず、文章で答えるだけです。"),
-        h("div", { style: { ...S.row, marginTop: 4 } },
-          ...rows.map((x) => h(Badge, { key: x.id, text: `${x.label}: ${x.available ? "使えます" : "使えません"}`, color: x.available ? C.ok : C.bad })),
-          h("button", { style: S.btn, onClick: () => loadHarnesses(true) }, "↻ 再確認")),
-        ...rows.filter((x) => !x.available && x.reason).map((x) => h("div", { key: "r" + x.id, style: { color: C.warn, fontSize: 12 } }, `${x.label}: ${x.reason}`)),
-        outside ? h("div", { style: { ...S.log, borderColor: C.warn } },
-          "⚠️ Claude Code / Codex は Kiro Crew の外で、Ghost Foreman が直接起動します（ブレストに限った例外）。道具（ツール）は使えず文章のやり取りだけです。緊急停止・実行記録・メモリ管理は Ghost Foreman が行います。各サービスの利用枠を使います。") : null,
-        usesGemini ? h("div", { style: { ...S.log, borderColor: C.warn } },
-          h("div", null, "⚠️ Gemini は Kiro Crew の外で、Gemini API の無料枠を Ghost Foreman が呼び出します。文章のやり取りだけで、使えないときに別のAIが代わりに答えることも、有料APIに切り替わることもありません。"),
-          h("label", { style: { display: "flex", gap: 8, alignItems: "flex-start", marginTop: 6 } },
-            h("input", { type: "checkbox", checked: geminiOk, onChange: (e) => setGeminiOk(e.target.checked), "aria-label": "この会議の内容を Gemini 無料枠に送ることを許可する" }),
-            h("span", null, h("strong", null, "この会議の内容を Gemini 無料枠に送ることを許可する"), "（この会議だけ）"),
-          ),
-          h("div", { style: S.mute }, geminiRow.consent_note || "議題・各AIの案など、未公開の制作情報を含みます。無料枠に送った内容は、Google がサービス改善に使う場合があります。"),
-          geminiOk ? null : h("div", { style: { color: C.warn, fontSize: 12 } }, "許可しない場合は、Gemini を別のAIに替えてください。")) : null),
-      h("div", { style: S.mute }, "相談段階では何も実装しません。あなたが案を採用したときだけ、担当スロットへ発注します。")
-    ),
-    ...d.meetings.map((m) => {
-      const live = m.summary && m.summary.live !== false;
-      const chosen = target[m.id] || (workers.find((w) => w.project_id === m.project_id) || workers[0] || {}).id || "";
-      return h(
-        "div",
-        { key: m.id, style: S.card },
-        h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: m.project_id }), h("span", { style: S.row }, h(Badge, { text: live ? "実AI" : "模擬", color: live ? C.ok : C.warn }), h(Badge, { text: m.status === "running" ? "進行中…" : m.status, color: m.status === "running" ? C.accent : C.mute }))),
-        h("h3", { style: { margin: "8px 0" } }, "議題: " + m.topic),
-        h("div", { style: S.mute }, "参加: " + m.participants.join(" / ")),
-        (m.summary && m.summary.participants_detail) ? h("div", { style: { ...S.row, marginTop: 4 } },
-          ...[...m.summary.participants_detail, ...(m.summary.synthesizer ? [{ ...m.summary.synthesizer, speaker: "整理役（" }] : [])].map((p, i) =>
-            h(Badge, { key: i, text: `${p.speaker ? p.speaker.split("（")[0] : ""}: ${p.label || p.harness}・${p.runtime_label || ""}${p.model ? "・" + p.model : ""}${p.ran_on ? (p.verified ? "" : "（未確認）") : "（未実行）"}`, color: p.verified ? (p.runtime !== "kiro_crew" ? C.warn : C.ok) : C.mute }))) : null,
-        (m.summary && m.summary.outside_kiro_crew) ? h("div", { style: { color: C.warn, fontSize: 12, marginTop: 4 } }, "この会議には、Kiro Crew の外で動いたAI（Ghost Foreman が直接起動した CLI、または Gemini API。ツールなし・文章のみ）が含まれます。") : null,
-        ...(m.summary && m.summary.participants_detail ? [...m.summary.participants_detail, ...(m.summary.synthesizer ? [m.summary.synthesizer] : [])] : [])
-          .filter((p) => p.self_report_check && p.self_report_check.status !== "ok")
-          .map((p, i) => h("div", { key: "sr" + i, style: { color: C.warn, fontSize: 12, marginTop: 2 } },
-            `⚠️ ${p.speaker ? p.speaker.split("（")[0] : (p.label || p.harness)}: ${p.self_report_check.note}`)),
-        (m.summary && m.summary.gemini_consent && m.summary.gemini_consent.asked) ? h("div", { style: { color: C.warn, fontSize: 12, marginTop: 2 } },
-          m.summary.gemini_consent.allowed ? `Gemini 無料枠への送信: この会議だけ許可（${m.summary.gemini_consent.decided_at}）` : "Gemini 無料枠への送信: 許可なし") : null,
-        ...m.rounds.map((r, i) => h("div", { key: i, style: S.log }, h("strong", null, r.phase), ...r.entries.map((e, j) => h("div", { key: j, style: { marginTop: 6 } }, h("strong", null, e.speaker + ": "), e.proposal || e.critique)))),
-        m.summary && m.summary.consensus
-          ? h("div", { style: { ...S.log, borderColor: C.accent } },
-              h("strong", null, "👻 幽霊の論点整理"), h("div", null, m.summary.consensus),
-              m.summary.conflict_points ? h("div", { style: { color: C.warn, marginTop: 4 } }, "対立点: " + m.summary.conflict_points) : null,
-              m.summary.unresolved ? h("div", { style: { marginTop: 4 } }, "未決事項: " + m.summary.unresolved) : null)
-          : null,
-        m.summary && m.summary.note ? h("div", { style: S.mute }, m.summary.note) : null,
-        m.status === "awaiting_human_adoption"
-          ? h("div", { style: { marginTop: 8 } },
-              h("div", { style: S.row },
-                h("span", { style: S.mute }, "発注先:"),
-                h("select", { style: { ...S.input, flex: "0 0 auto" }, value: chosen, onChange: (e) => setTarget({ ...target, [m.id]: e.target.value }) },
-                  ...(workers.length ? workers : [{ id: "", name: "（実スロットなし）" }]).map((w) => h("option", { key: w.id || "none", value: w.id }, w.id ? `${w.id} ${w.name}` : w.name)))),
-              ...(m.summary.options_for_human || []).map((o) =>
-                h("div", { key: o.id, style: { ...S.log, borderColor: C.accent } },
-                  h("strong", null, o.label), o.detail ? h("div", null, o.detail) : null,
-                  h("button", { style: o.id === "hold_as_idea" ? S.btn : S.btnOk, disabled: o.id !== "hold_as_idea" && !chosen, onClick: () => call("POST", "/meetings/adopt", { meeting_id: m.id, option_id: o.id, target_slot_id: chosen }) }, o.id === "hold_as_idea" ? "保存のみ" : "この案を採用して発注"))))
-          : null
-      );
-    })
-  );
+          h("span", { style: S.mute }, "まとめ役（意見を整理するAI）:"),
+          h("select", { style: { ...S.input, flex: "0 0 auto" }, value: organiser, onChange: (e) => setOrganiser(e.target.value), "aria-label": "まとめ役のAI" }, ...agentOptions))) : null),
+    h("div", { style: S.card },
+      h("button", { style: { ...S.btnOk, ...S.big, width: "100%" }, disabled: !!why, onClick: start }, "💬 この内容で相談を始める"),
+      why ? h("div", { style: { ...S.mute, marginTop: 6 } }, why) : null,
+      h("div", { style: { ...S.mute, marginTop: 6 } }, "相談の段階では、何も作りません。あなたが案を選んだときだけ、作業を頼みます。")),
+    ok.length ? h("h3", { style: { ...S.h3, marginTop: 16 } }, "相談中・結果待ち") : null,
+    ...ok.map((m) => h(MeetingCard, { key: m.id, m, d, call })),
+    past.length ? h("div", { style: { marginTop: 8 } },
+      h("button", { style: S.btn, onClick: () => setShowPast(!showPast) }, showPast ? "▲ 過去の相談を閉じる" : `▼ 過去の相談（${past.length} 件）を見る`),
+      showPast ? h("div", { style: { marginTop: 8 } }, ...past.map((m) => h(MeetingCard, { key: m.id, m, d, call }))) : null) : null,
+    failed.length ? h("div", { style: { marginTop: 8 } },
+      h("button", { style: S.btn, onClick: () => setShowFailed(!showFailed) }, showFailed ? "▲ うまくいかなかった相談を閉じる" : `▼ うまくいかなかった相談（${failed.length} 件）を見る`),
+      showFailed ? h("div", { style: { marginTop: 8 } }, ...failed.map((m) => h(MeetingCard, { key: m.id, m, d, call }))) : null) : null);
 }
 
-// ------------------------------------------------------------------ policies / news / audit
-function Policies({ d }) {
-  if (!d.policies.length) return h("div", { style: S.card }, "確定ルールはまだありません。");
-  return h("div", null, ...d.policies.map((p) => h("div", { key: p.id, style: S.card },
-    h("div", { style: { ...S.row, justifyContent: "space-between" } }, h("strong", null, p.title), h(Badge, { text: `${p.scope} / ${p.project_id} / v${p.version}` })),
-    h("div", { style: { marginTop: 6, whiteSpace: "pre-wrap" } }, p.rule_text),
-    h("div", { style: S.mute }, `${p.id} / 由来 ${p.source}${p.locked ? " / 確定仕様（無断変更不可）" : ""} / キーワード ${(p.keywords || []).join(", ")}`))));
+// ------------------------------------------------------------------ rules / news
+function Rules({ d }) {
+  if (!d.policies.length) return h("div", { style: S.card }, "決めたルールはまだありません。AIの質問に「これからもこの方針にする」で答えると、ここに増えていきます。");
+  return h("div", null,
+    h("div", { style: S.mute }, "あなたが決めた方針の一覧です。AIが迷ったとき、幽霊はこれを根拠に代わりに答えます。"),
+    ...d.policies.map((p) => h("div", { key: p.id, style: S.card },
+      h("div", { style: { ...S.row, justifyContent: "space-between" } }, h("strong", null, p.title), h(Badge, { text: `${SCOPE[p.scope] || p.scope}${p.scope === "project" ? "（" + projectName(d, p.project_id) + "）" : ""}` })),
+      h("div", { style: { marginTop: 6, whiteSpace: "pre-wrap" } }, p.rule_text),
+      h("div", { style: S.mute }, `${p.locked ? "確定仕様（無断では変えません）　" : ""}${p.id}・第${p.version}版`))));
 }
 
 function News({ d, call }) {
@@ -280,18 +379,20 @@ function News({ d, call }) {
   };
   return h("div", null,
     h("div", { style: S.card },
-      h("div", { style: S.row }, h("input", { style: S.input, value: url, onChange: (e) => setUrl(e.target.value), placeholder: "https://… 公開ページのURL" }), h("button", { style: S.btnOk, disabled: busy || !url.trim(), onClick: add }, busy ? "要約中…" : "要約して保存")),
+      h("div", { style: S.mute }, "気になる記事やページのURLを貼ってください。要約して、「事実」と「推測」を分けて保存します。"),
+      h("div", { style: { ...S.row, marginTop: 6 } }, h("input", { style: S.input, value: url, onChange: (e) => setUrl(e.target.value), placeholder: "https://… 公開ページのURL" }), h("button", { style: S.btnOk, disabled: busy || !url.trim(), onClick: add }, busy ? "要約中…" : "要約して保存")),
       err ? h("div", { style: { color: C.bad, marginTop: 6 } }, err) : null,
-      h("div", { style: S.mute }, "公開ページだけを取得します（内部アドレスは拒否）。事実と推定を分けて保存します。")),
+      h("div", { style: S.mute }, "公開されているページだけを取得します（社内のアドレスなどは拒否します）。")),
     ...d.news.map((n) => h("div", { key: n.id, style: S.card },
-      h("strong", null, n.title), h("div", { style: S.mute }, `${n.category} / 掲載日 ${n.published_date} / 収集理由: ${n.relevance_reason}`),
+      h("strong", null, n.title), h("div", { style: S.mute }, `${n.category} ／ 掲載日 ${n.published_date} ／ 集めた理由: ${n.relevance_reason}`),
       h("div", { style: { ...S.log, borderColor: C.ok } }, h("strong", null, "事実\n"), n.facts_summary),
-      h("div", { style: { ...S.log, borderColor: C.warn } }, h("strong", null, "推定\n"), n.estimates_summary),
-      h("div", { style: S.mute }, "元記事: " + n.url))));
+      h("div", { style: { ...S.log, borderColor: C.warn } }, h("strong", null, "推測\n"), n.estimates_summary),
+      h("div", { style: S.mute }, "元の記事: " + n.url))));
 }
 
+// ------------------------------------------------------------------ details (technical settings and records)
 function Audit({ d }) {
-  if (!d.audits.length) return h("div", { style: S.card }, "監査ログはまだありません。");
+  if (!d.audits.length) return h("div", { style: S.card }, "判断の記録はまだありません。");
   return h("div", null, ...d.audits.map((a) => h("div", { key: a.id, style: S.card },
     h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: `${a.project_id} / ${a.slot_id}` }), h(Badge, { text: `${a.actor}: ${a.action_type}` })),
     h("div", { style: { marginTop: 6 } }, "原文: " + a.raw_question),
@@ -299,7 +400,6 @@ function Audit({ d }) {
     h("div", { style: S.log }, a.answer_sent), h("div", { style: S.mute }, (a.rationale || "") + " / " + a.created_at))));
 }
 
-// ------------------------------------------------------------------ settings
 // Only on Ghost Foreman's own phone page (ui/m/index.html sets window.__gfPush). Inside the Kiro Crew dashboard the
 // host's own notification settings are used instead.
 function PhoneNotifications({ call }) {
@@ -324,19 +424,17 @@ function PhoneNotifications({ call }) {
   };
   const on = st && st.subscribed && st.permission === "granted";
   return h("div", { style: S.card },
-    h("h3", { style: { marginTop: 0 } }, "📲 このiPhoneへの通知"),
+    h("h3", { style: S.h3 }, "📲 このiPhoneへの通知"),
     st ? h("div", null, on ? "オン（判断待ちが出たらこの端末に通知します）" : st.standalone ? "オフ" : "ホーム画面に追加したアプリから開くと、オンにできます") : h("div", null, "確認中…"),
     h("div", { style: { ...S.row, marginTop: 8 } },
       !on ? h("button", { style: S.btnOk, disabled: busy || !(st && st.standalone), onClick: enable }, "🔔 通知をオンにする") : null,
       on ? h("button", { style: S.btn, disabled: busy, onClick: test }, "テスト通知を送る") : null),
     msg ? h("div", { style: { marginTop: 6 } }, msg) : null,
-    h("div", { style: S.mute }, "通知がいつ届くかは、上部のモード（離席=すぐ / 常駐=送らない / おやすみ=朝にまとめて）で変わります。テスト通知はモードに関係なく送ります。"));
+    h("div", { style: S.mute }, "通知がいつ届くかは、ホームの「いまの状況」（家にいる／外出中／おやすみ）で変わります。テスト通知は状況に関係なく送ります。"));
 }
 
-function Settings({ d, call }) {
+function DetailSettings({ d, call }) {
   const allow = !!(d.mode_state && d.mode_state.allow_unpublished_to_free_tier);
-  const u = d.usage || { totals: [] };
-  const cooling = u.gemini_cooldown_until && u.gemini_cooldown_until * 1000 > Date.now();
   const toggle = () => {
     const want = !allow;
     if (want && !window.confirm("制作内容（AIからの質問・確定ルールの本文）を Gemini の無料枠へ送信します。\n無料枠に送った内容は、Google によって製品改善などに利用される可能性があります。\n\n許可しますか？")) return;
@@ -345,41 +443,109 @@ function Settings({ d, call }) {
   return h("div", null,
     h(PhoneNotifications, { call }),
     h("div", { style: S.card },
-      h("h3", { style: { marginTop: 0 } }, "🔒 制作内容の Gemini 無料枠への送信"),
-      h("div", null, "AIからの質問や確定ルールの本文を、判定のために Gemini の無料枠へ送ってよいかを決めます。"),
-      h("label", { style: { ...S.row, margin: "8px 0" } }, h("input", { type: "checkbox", checked: allow, onChange: toggle }), h("strong", null, allow ? "許可している（制作内容を無料枠へ送信する）" : "許可していない（制作内容は送信しない）")),
-      h("div", { style: S.mute }, "許可しない場合、制作内容の判定は Kiro Crew の実セッションで行います。公開ニュースの整理はこの設定に関係なく Gemini を使います。")),
-    h("div", { style: S.card },
-      h("h3", { style: { marginTop: 0 } }, "💰 費用と使用量"),
-      h("div", null, "実際の請求額: ", h(Badge, { text: u.actual_billing || "未確認", color: C.warn })),
-      h("div", { style: S.mute }, u.billing_note || ""),
-      h("div", { style: { margin: "6px 0" } }, cooling ? "Gemini無料枠は上限により待機中（Kiroの実セッションに切替。有料APIには切り替えません）" : "Gemini無料枠: 利用可能（または未使用）"),
+      h("h3", { style: S.h3 }, "🔒 制作内容を Gemini の無料枠へ送ってよいか（常時の設定）"),
+      h("div", null, "AIからの質問や確定ルールの本文を、判定のために Gemini の無料枠へ送ってよいかを決めます。AI会議で Gemini を使うときは、この設定とは別に、会議ごとに許可を聞きます。"),
+      h("label", { style: { ...S.row, margin: "8px 0" } }, h("input", { type: "checkbox", style: { width: 22, height: 22 }, checked: allow, onChange: toggle }), h("strong", null, allow ? "許可している（制作内容を無料枠へ送信する）" : "許可していない（制作内容は送信しない）")),
+      h("div", { style: S.mute }, "許可しない場合、制作内容の判定は Kiro Crew の実セッションで行います。公開ニュースの整理は、この設定に関係なく Gemini を使います。")));
+}
+
+function DetailCost({ d }) {
+  const u = d.usage || { totals: [] };
+  const cooling = u.gemini_cooldown_until && u.gemini_cooldown_until * 1000 > Date.now();
+  return h("div", { style: S.card },
+    h("h3", { style: S.h3 }, "💰 費用と使用量"),
+    h("div", null, "実際の請求額: ", h(Badge, { text: u.actual_billing || "未確認", color: C.warn })),
+    h("div", { style: S.mute }, u.billing_note || ""),
+    h("div", { style: { margin: "6px 0" } }, cooling ? "Gemini無料枠は上限により待機中です（有料APIには切り替えません）" : "Gemini無料枠: 利用可能（または未使用）"),
+    h("div", { style: { overflowX: "auto" } },
       h("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 13 } },
         h("thead", null, h("tr", { style: { textAlign: "left" } }, ...["提供元", "呼び出し", "成功", "トークン(入/出)", "請求額"].map((t) => h("th", { key: t }, t)))),
-        h("tbody", null, ...(u.totals || []).map((t) => h("tr", { key: t.provider_id }, h("td", null, t.provider_id), h("td", null, t.calls), h("td", null, t.ok_calls), h("td", null, `${t.input_tokens} / ${t.output_tokens}`), h("td", null, t.cost_display || "未確認"))))),
-      h("div", { style: S.mute }, "トークン数は提供元の実測値です。Kiro の使用量はホストが公開していないため、0ではなく未確認として扱います。有料APIへの切替機能は実装していません。")),
+        h("tbody", null, ...(u.totals || []).map((t) => h("tr", { key: t.provider_id }, h("td", null, t.provider_id), h("td", null, t.calls), h("td", null, t.ok_calls), h("td", null, `${t.input_tokens} / ${t.output_tokens}`), h("td", null, t.cost_display || "未確認")))))),
+    h("div", { style: S.mute }, "トークン数は提供元の実測値です。Kiro の使用量はホストが公開していないため、0ではなく未確認として扱います。有料APIへの切替機能は実装していません。"));
+}
+
+function DetailRuns({ d }) {
+  return h("div", { style: S.card },
+    h("h3", { style: S.h3 }, "🧪 Kiro Crew 外で実行したAIの記録"),
+    h("div", { style: S.mute }, "AI会議のために Ghost Foreman が直接起動した Claude Code / Codex の記録です。質問の本文は保存せず、ハッシュだけを残します。請求額は確認できないため「未確認」です。"),
+    ...(d.external_runs || []).map((r) => h("div", { key: r.id, style: { ...S.log, borderColor: r.status === "ok" ? C.ok : C.bad } },
+      h("strong", null, `[${r.status}] ${r.harness}${r.model ? "・" + r.model : ""}`), ` ${r.started_at}　${Math.round((r.duration_ms || 0) / 100) / 10}秒　トークン ${r.input_tokens}/${r.output_tokens}　会議 ${r.meeting_id || "-"}`,
+      r.error ? h("div", { style: { color: C.bad } }, r.error) : null)),
+    (d.external_runs || []).length ? null : h("div", { style: S.mute }, "まだ記録はありません。"));
+}
+
+function DetailNotices({ d }) {
+  return h("div", { style: S.card },
+    h("h3", { style: S.h3 }, "🔔 通知の履歴"),
+    h("div", { style: S.mute }, "sent=送信 / held=おやすみ中に保留 / held_resident=家にいるため通知せず / failed=失敗 / not_sent=模擬モード"),
+    ...(d.notifications || []).map((n) => h("div", { key: n.id, style: S.log }, h("strong", null, `[${n.delivery}] `), `${n.title} ${n.body}`, h("div", { style: S.mute }, `${n.ts} ${n.detail || ""}`))));
+}
+
+function DetailSlots({ d, call }) {
+  return h("div", null,
+    h("div", { style: { ...S.card, ...S.mute } }, "「本物のAI（実接続）」は Kiro Crew Gateway 上の本物のセッションです。「デモ用の見本（模擬）」は動作を見せるためのサンプルで、実在のAIではありません。"),
+    ...d.slots.map((s) => h(SlotCard, { key: s.id, d, s, call, technical: true })));
+}
+
+const DETAIL_SECTIONS = [["settings", "通知・送信の設定"], ["cost", "費用と使用量"], ["runs", "外部AIの実行記録"], ["notices", "通知の履歴"], ["audit", "判断の記録"], ["slots", "AIの一覧（技術情報）"]];
+
+function Details({ d, call, section, setSection }) {
+  const body = { settings: DetailSettings, cost: DetailCost, runs: DetailRuns, notices: DetailNotices, audit: Audit, slots: DetailSlots }[section] || DetailSettings;
+  return h("div", null,
+    h("div", { style: S.mute }, "ふだんは使わない、設定と記録です。"),
+    h("div", { style: { ...S.row, margin: "8px 0 12px" } }, ...DETAIL_SECTIONS.map(([k, t]) => h("button", { key: k, style: { ...S.btn, ...(section === k ? { background: C.accent, color: "#0d0b18" } : {}) }, onClick: () => setSection(k) }, t))),
+    h(body, { d, call }));
+}
+
+// ------------------------------------------------------------------ home
+const MODES = [
+  ["resident", "🏠 家にいる", "通知しません"],
+  ["away", "🚃 外出中", "判断待ちをスマホに通知"],
+  ["sleep", "🌙 おやすみ", "朝にまとめて通知"],
+];
+
+function Home({ d, call, go }) {
+  const pending = d.questions.filter(isPending).length;
+  const running = d.meetings.filter((m) => m.status === "running").length;
+  const waiting = d.meetings.filter((m) => m.status === "awaiting_human_adoption").length;
+  const mode = (d.mode_state && d.mode_state.mode) || "away";
+  const liveSlots = d.slots.filter((s) => s.is_live).length;
+  return h("div", null,
+    pending
+      ? h("div", { style: { ...S.card, borderColor: C.warn } },
+          h("div", { style: { fontSize: 18, fontWeight: 600 } }, "👻 あなたの判断を待っているAIがいます"),
+          h("div", null, `${pending} 件の確認が届いています。`),
+          h("button", { style: { ...S.btnOk, ...S.big, marginTop: 8 }, onClick: () => go("inbox") }, "答える →"))
+      : h("div", { style: S.card }, "✅ いま、あなたの判断を待っているものはありません。"),
+    running ? h("div", { style: { ...S.card, borderColor: C.accent } }, `💬 AIたちが相談中です（${running} 件）。数分かかります。`, " ", h("button", { style: S.btn, onClick: () => go("consult") }, "様子を見る")) : null,
+    waiting && !running ? h("div", { style: { ...S.card, borderColor: C.warn } }, `💬 相談の結果が出ています（${waiting} 件）。どの案で進めるか選べます。`, " ", h("button", { style: S.btn, onClick: () => go("consult") }, "結果を見る")) : null,
+    h("h2", { style: S.h2 }, "何をしますか？"),
+    h(Tile, { icon: "💬", title: "AIたちに相談する", desc: "企画の悩みを、いろいろなAIに聞いて、意見をまとめてもらいます。", onClick: () => go("consult"), badge: waiting ? `結果 ${waiting} 件` : "" }),
+    h(Tile, { icon: "📥", title: "AIからの質問に答える", desc: "AIが迷ったときの確認に答えます。", onClick: () => go("inbox"), badge: pending ? `${pending} 件待ち` : "", accent: !!pending }),
+    h(Tile, { icon: "🤖", title: "AIたちの様子を見る", desc: liveSlots ? `本物のAIが ${liveSlots} 体、動いています。` : "誰がいま何をしているか見て、止めたりできます。", onClick: () => go("ais") }),
+    h(Tile, { icon: "📰", title: "ニュースを調べる", desc: "気になる記事のURLを貼ると、要約して保存します。", onClick: () => go("news") }),
+    h(Tile, { icon: "🧠", title: "決めたルールを見る", desc: "あなたが決めた方針の一覧です。", onClick: () => go("rules") }),
     h("div", { style: S.card },
-      h("h3", { style: { marginTop: 0 } }, "🧪 Kiro Crew 外で実行したAI（会議の参加者）"),
-      h("div", { style: S.mute }, "Claude Code / Codex を Ghost Foreman が直接起動した記録です。質問の本文は保存せず、ハッシュだけを残します。請求額は確認できないため「未確認」です。"),
-      ...(d.external_runs || []).map((r) => h("div", { key: r.id, style: { ...S.log, borderColor: r.status === "ok" ? C.ok : C.bad } },
-        h("strong", null, `[${r.status}] ${r.harness}${r.model ? "・" + r.model : ""}`), ` ${r.started_at}　${Math.round((r.duration_ms || 0) / 100) / 10}秒　トークン ${r.input_tokens}/${r.output_tokens}　会議 ${r.meeting_id || "-"}`,
-        r.error ? h("div", { style: { color: C.bad } }, r.error) : null)),
-      (d.external_runs || []).length ? null : h("div", { style: S.mute }, "まだ記録はありません。")),
-    h("div", { style: S.card },
-      h("h3", { style: { marginTop: 0 } }, "🔔 通知の履歴"),
-      h("div", { style: S.mute }, "sent=送信 / held=おやすみ中に保留 / held_resident=常駐モードのため通知せず / failed=失敗 / not_sent=模擬モード"),
-      ...(d.notifications || []).map((n) => h("div", { key: n.id, style: S.log }, h("strong", null, `[${n.delivery}] `), `${n.title} ${n.body}`, h("div", { style: S.mute }, `${n.ts} ${n.detail || ""}`)))));
+      h("div", { style: { fontWeight: 600, marginBottom: 6 } }, "いま、どんな状況ですか？（通知の出し方が変わります）"),
+      h("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 } }, ...MODES.map(([k, t, sub]) => h("button", { key: k, "aria-pressed": mode === k, style: { ...S.btn, padding: "10px 8px", textAlign: "center", ...(mode === k ? { background: C.accent, color: "#0d0b18" } : {}) }, onClick: () => call("POST", "/mode", { mode: k }) }, h("div", null, t), h("div", { style: { fontSize: 11 } }, sub))))),
+    h("div", { style: { textAlign: "center", marginTop: 16 } }, h("button", { style: S.btn, onClick: () => go("details") }, "⚙️ 詳細・設定（通知・費用・記録）")));
 }
 
 // ------------------------------------------------------------------ app
-const TABS = [["inbox", "📥 判断待ち"], ["slots", "🤖 スロット"], ["meetings", "💬 AI会議"], ["policies", "🧠 記憶・ルール"], ["news", "📰 ニュース"], ["settings", "⚙️ 設定・費用"], ["audit", "📜 監査ログ"]];
+const TITLES = { inbox: "📥 AIからの質問に答える", consult: "💬 AIたちに相談する", ais: "🤖 AIたちの様子", news: "📰 ニュースを調べる", rules: "🧠 決めたルール", details: "⚙️ 詳細・設定" };
 
 export default function GhostForemanApp() {
   const api = useAppApi();
   const [d, setD] = useState(null);
   const [error, setError] = useState("");
   const focusQ = useMemo(() => new URLSearchParams(window.location.search).get("q") || "", []);
-  const [tab, setTab] = useState(focusQ ? "inbox" : "inbox");
+  const [view, setView] = useState(focusQ ? "inbox" : "home");
+  const [section, setSection] = useState("settings");
+  const go = (target) => {
+    if (target.startsWith("details:")) { setSection(target.split(":")[1]); setView("details"); }
+    else setView(target);
+    if (typeof window !== "undefined" && window.scrollTo) { try { window.scrollTo(0, 0); } catch (e) { /* jsdom */ } }
+  };
 
   const refresh = useCallback(async () => {
     try { setD(await api.get(BASE + "/dashboard")); setError(""); }
@@ -408,29 +574,26 @@ export default function GhostForemanApp() {
   };
   const live = d.mode_state && d.mode_state.gateway_mode === "live_gateway";
   const pending = d.questions.filter(isPending).length;
-  const body = { inbox: Inbox, slots: Slots, meetings: Meetings, policies: Policies, news: News, settings: Settings, audit: Audit }[tab];
-  return h("div", { style: S.page },
+  const body = { home: Home, inbox: Inbox, consult: Consult, ais: AiWatch, news: News, rules: Rules, details: null }[view];
+  return h("div", { style: S.page }, h("div", { style: S.wrap },
     h("div", { style: { ...S.row, justifyContent: "space-between", marginBottom: 10 } },
-      h("div", null, h("strong", { style: { fontSize: 18 } }, "👻 Ghost Foreman"), h("div", { style: S.mute }, "Your agents work. You have a life.")),
+      h("div", null, h("strong", { style: { fontSize: 20 } }, "👻 Ghost Foreman"), h("div", { style: S.mute }, "AIたちは働く。あなたには生活がある。")),
       h("div", { style: S.row },
-        h(Badge, { text: live ? "Gateway実接続" : "模擬モード", color: live ? C.ok : C.warn }),
-        h("select", { style: { ...S.input, flex: "0 0 auto" }, value: (d.mode_state && d.mode_state.mode) || "away", onChange: (e) => call("POST", "/mode", { mode: e.target.value }) },
-          h("option", { value: "resident" }, "🏠 常駐（通知しない）"), h("option", { value: "away" }, "🚃 離席（判断待ちを通知）"), h("option", { value: "sleep" }, "🌙 おやすみ（朝にまとめて通知）")),
-        h("button", { style: S.btnBad, onClick: () => { if (window.confirm("すべての実スロットを停止します。人間が再開を許可するまで、自動では何も再開されません。よろしいですか？")) call("POST", "/stop", { scope: "all" }); } }, "🛑 全停止"),
-        h("button", { style: S.btnOk, onClick: () => resumeAll() }, "▶ 停止を解除"))),
+        h(Badge, { text: live ? "● つながっています（Gateway実接続）" : "デモ表示（模擬モード）", color: live ? C.ok : C.warn }),
+        h("button", { style: { ...S.btnBad, ...S.big }, onClick: () => { if (window.confirm("すべての実スロットを停止します。人間が再開を許可するまで、自動では何も再開されません。よろしいですか？")) call("POST", "/stop", { scope: "all" }); } }, "🛑 全停止"))),
     d.halt && d.halt.active
       ? h("div", { style: { ...S.card, borderColor: C.bad, background: "#2a0a14" } },
-          h("strong", { style: { color: C.bad, fontSize: 16 } }, "🛑 緊急停止中"),
+          h("strong", { style: { color: C.bad, fontSize: 17 } }, "🛑 緊急停止中"),
           h("div", null, "人間が再開を許可するまで、自動回答・自動発注・メッセージ送信・会議の開催・ツールの自動承認は行いません。停止中に届いた確認は、解除後も自動では回答せず、判断待ちとして表示します。"),
           h("div", { style: S.mute }, "対象: " + (d.halt.all ? "すべて" : [...(d.halt.projects || []).map((p) => "案件 " + p), ...(d.halt.slots || []).map((x) => "スロット " + x)].join(", ")) + "　開始: " + (d.halt.since || "")),
           h("div", { style: { ...S.row, marginTop: 8 } },
-            h("button", { style: S.btnOk, onClick: () => resumeAll() }, "▶ 停止をすべて解除（再開を許可）"),
+            h("button", { style: { ...S.btnOk, ...S.big }, onClick: () => resumeAll() }, "▶ 停止をすべて解除（再開を許可）"),
             ...(d.halt.all ? [] : (d.halt.projects || []).map((p) => h("button", { key: "p" + p, style: S.btn, onClick: () => { if (window.confirm("案件 " + p + " の停止を解除しますか？")) call("POST", "/stop", { scope: "resume_project", target_id: p }); } }, "案件 " + p + " だけ解除")))))
       : null,
     error ? h("div", { style: { ...S.card, borderColor: C.bad, color: C.bad } }, error) : null,
-    h("div", { style: { ...S.row, marginBottom: 10 } }, ...TABS.map(([k, t]) => h("button", { key: k, style: { ...S.btn, ...(tab === k ? { background: C.accent, color: "#0d0b18" } : {}) }, onClick: () => setTab(k) }, t + (k === "inbox" && pending ? ` (${pending})` : "")))),
-    h(body, { d, call, focusQ })
-  );
+    view === "home" ? null : h(BackBar, { title: TITLES[view] || "", onBack: () => go("home") }),
+    view === "details" ? h(Details, { d, call, section, setSection }) : h(body, { d, call, focusQ, go }),
+    view === "home" || !pending || view === "inbox" ? null : h("div", { style: { ...S.card, borderColor: C.warn, marginTop: 12 } }, `📥 判断待ちが ${pending} 件あります。`, " ", h("button", { style: S.btn, onClick: () => go("inbox") }, "答える"))));
 }
 
 export function mount() {
