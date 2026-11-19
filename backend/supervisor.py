@@ -858,12 +858,13 @@ class ForemanSupervisor:
         participants: Optional[List[Any]] = None,
         synthesizer_harness: str = "",
         allow_unpublished_to_gemini: bool = False,
+        language: str = "ja",
     ) -> Dict[str, Any]:
         """Run a structured AI Meeting: Step 1 Independent Ideation -> Step 2 Mutual Critique -> Step 3 Ghost Synthesis."""
         if self.adapter.live is not None:
             # Real meeting: participants are live agent slots; `participants` (optional) are their perspectives.
             return self.meetings.start(project_id, topic, participants, synthesizer_harness,
-                                       allow_unpublished_to_gemini=allow_unpublished_to_gemini)
+                                       allow_unpublished_to_gemini=allow_unpublished_to_gemini, language=language)
         # --- SIMULATED fallback (no Gateway bound): canned text, labelled as such ---
         chosen = [
             str(p.get("perspective", "")) if isinstance(p, dict) else str(p)

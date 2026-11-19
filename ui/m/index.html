@@ -39,9 +39,15 @@
 </head>
 <body>
   <div id="install"></div>
-  <div id="root"><div class="box">👻 Ghost Foreman 起動中…</div></div>
+  <div id="root"><div class="box">👻 Ghost Foreman …</div></div>
   <script type="module">
     const BASE = "/api/apps/ghost-foreman/m/";
+    // Japanese / English. The same saved choice as the app screen ("gf-lang"); with none saved, the browser's language.
+    const lang = () => {
+      try { const s = localStorage.getItem("gf-lang"); if (s === "ja" || s === "en") return s; } catch (e) { /* storage blocked */ }
+      return String(navigator.language || "ja").toLowerCase().startsWith("ja") ? "ja" : "en";
+    };
+    const L = (ja, en) => (lang() === "en" ? en : ja);
     const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
     const root = document.getElementById("root");
     const el = (tag, attrs = {}, ...kids) => {
@@ -56,15 +62,20 @@
 
     // In Safari (not yet on the Home Screen): explain how to install. The sign-in link stays in the address bar on
     // purpose, because "Add to Home Screen" saves this address and the installed app signs in with it once.
-    if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
-      document.getElementById("install").append(
+    const needsInstall = !standalone && /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const renderInstall = () => {
+      document.getElementById("install").replaceChildren(
         el("div", { class: "box" },
-          el("h2", { text: "📲 ホーム画面に追加してください" }),
+          el("h2", { text: L("📲 ホーム画面に追加してください", "📲 Please add this to your Home Screen") }),
           el("ol", {},
-            el("li", { text: "画面下の 共有ボタン（□に↑）を押す" }),
-            el("li", { text: "「ホーム画面に追加」を選び、「追加」を押す" }),
-            el("li", { text: "ホーム画面の Ghost Foreman アイコンから開く（すぐに開いてください。このリンクには有効期限があります）" })),
-          el("div", { class: "mute", text: "ホーム画面から開いたあと、「⚙️ 設定・費用」で通知をオンにできます。" })));
+            el("li", { text: L("画面下の 共有ボタン（□に↑）を押す", "Tap the Share button at the bottom (a square with an arrow)") }),
+            el("li", { text: L("「ホーム画面に追加」を選び、「追加」を押す", "Choose \"Add to Home Screen\", then tap \"Add\"") }),
+            el("li", { text: L("ホーム画面の Ghost Foreman アイコンから開く（すぐに開いてください。このリンクには有効期限があります）", "Open the Ghost Foreman icon on your Home Screen (do it right away: this link expires)") })),
+          el("div", { class: "mute", text: L("ホーム画面から開いたあと、「⚙️ 詳細・設定」で通知をオンにできます。", "After opening it from the Home Screen, you can turn notifications on under \"⚙️ Details & settings\".") })));
+    };
+    if (needsInstall) {
+      renderInstall();
+      window.addEventListener("gf-lang", renderInstall); // the app's language switch announces itself
     } else if (standalone) {
       // Inside the installed app there is no address bar; drop the used link from the history entry anyway.
       const u = new URL(location.href);
@@ -81,18 +92,18 @@
         return out;
       },
       async enable() {
-        if (!pushSupported()) throw new Error(standalone ? "この端末では通知を使えません（iOS 16.4 以降が必要です）" : "通知は、ホーム画面に追加したアプリから開いたときだけオンにできます");
+        if (!pushSupported()) throw new Error(standalone ? L("この端末では通知を使えません（iOS 16.4 以降が必要です）", "Notifications are not available on this device (iOS 16.4 or later is required)") : L("通知は、ホーム画面に追加したアプリから開いたときだけオンにできます", "Notifications can only be turned on from the app added to the Home Screen"));
         const perm = await Notification.requestPermission();
-        if (perm !== "granted") throw new Error("通知が許可されませんでした（iPhoneの設定アプリ → 通知 → Ghost Foreman で許可できます）");
+        if (perm !== "granted") throw new Error(L("通知が許可されませんでした（iPhoneの設定アプリ → 通知 → Ghost Foreman で許可できます）", "Notifications were not allowed (you can allow them in the iPhone Settings app → Notifications → Ghost Foreman)"));
         // Pushes are delivered by Kiro Crew's own service worker (scope "/"), which shows them and opens the link.
         const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
         await navigator.serviceWorker.ready;
         const k = await fetch("/api/notifications/push/vapid-public-key", { credentials: "same-origin" });
-        if (!k.ok) throw new Error("通知用の鍵を取得できませんでした (" + k.status + ")");
+        if (!k.ok) throw new Error(L("通知用の鍵を取得できませんでした (", "Could not get the notification key (") + k.status + ")");
         const { publicKey } = await k.json();
         const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) }));
         const r = await fetch("/api/notifications/push/subscribe", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sub.toJSON()) });
-        if (!r.ok) throw new Error("購読の登録に失敗しました (" + r.status + ")");
+        if (!r.ok) throw new Error(L("購読の登録に失敗しました (", "Could not register the subscription (") + r.status + ")");
         return true;
       },
     };
@@ -108,23 +119,23 @@
     }
 
     function showSignIn(message) {
-      const input = el("input", { type: "url", placeholder: "https://…?token=… を貼り付け", autocomplete: "off", autocapitalize: "off" });
+      const input = el("input", { type: "url", placeholder: L("https://…?token=… を貼り付け", "Paste https://…?token=…"), autocomplete: "off", autocapitalize: "off" });
       const err = el("div", { class: "err" });
-      const go = el("button", { text: "サインイン" });
+      const go = el("button", { text: L("サインイン", "Sign in") });
       go.onclick = () => {
         // Only the token value is taken from what was pasted; we never navigate to a pasted address.
         const m = String(input.value).match(/[?&#]token=([A-Za-z0-9._-]{20,})/);
-        if (!m) { err.textContent = "ログイン用リンクが見つかりません。PCで表示したリンク全体を貼り付けてください。"; return; }
+        if (!m) { err.textContent = L("ログイン用リンクが見つかりません。PCで表示したリンク全体を貼り付けてください。", "No sign-in link found. Paste the whole link shown on the PC."); return; }
         location.replace(BASE + "?token=" + encodeURIComponent(m[1]));
       };
       root.replaceChildren(el("div", { class: "box" },
-        el("h2", { text: "🔑 サインインしてください" }),
-        el("div", { text: message || "サインインの有効期限が切れました。" }),
+        el("h2", { text: L("🔑 サインインしてください", "🔑 Please sign in") }),
+        el("div", { text: message || L("サインインの有効期限が切れました。", "Your sign-in has expired.") }),
         el("ol", {},
-          el("li", { text: "PCで scripts\\phone-link.ps1 を実行し、表示されたリンクを iPhone に送る（AirDropなど）" }),
-          el("li", { text: "リンクを長押しして「コピー」し、下の欄に貼り付ける" })),
+          el("li", { text: L("PCで scripts\\phone-link.ps1 を実行し、表示されたリンクを iPhone に送る（AirDropなど）", "On the PC run scripts\\phone-link.ps1 and send the link it shows to this iPhone (AirDrop, etc.)") }),
+          el("li", { text: L("リンクを長押しして「コピー」し、下の欄に貼り付ける", "Press and hold the link, choose \"Copy\", and paste it into the box below") })),
         input, go, err,
-        el("div", { class: "mute", text: "ホーム画面のアプリと Safari はログイン情報が別々です。このアプリの中でサインインしてください。" })));
+        el("div", { class: "mute", text: L("ホーム画面のアプリと Safari はログイン情報が別々です。このアプリの中でサインインしてください。", "The Home Screen app and Safari keep separate sign-ins. Please sign in inside this app.") })));
     }
 
     try {
@@ -137,7 +148,7 @@
         createRoot(root).render(React.createElement(App));
       }
     } catch (e) {
-      root.replaceChildren(el("div", { class: "box" }, el("h2", { text: "読み込みに失敗しました" }), el("div", { class: "err", text: String(e) })));
+      root.replaceChildren(el("div", { class: "box" }, el("h2", { text: L("読み込みに失敗しました", "Could not load the app") }), el("div", { class: "err", text: String(e) })));
     }
   </script>
 </body>

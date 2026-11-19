@@ -14,6 +14,7 @@ globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 dom.window.HTMLElement.prototype.scrollIntoView = function () { globalThis.__scrolled = this.textContent.slice(0, 40); };
 dom.window.scrollTo = () => {};
+dom.window.localStorage.setItem("gf-lang", "ja"); // jsdom's browser language is English; the Japanese tests start from a saved Japanese choice
 
 const calls = [];
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -178,6 +179,7 @@ await click(startButton());
 await settle(20);
 const startCall = calls.find((c) => c[0] === "POST" && c[1].endsWith("/meetings"));
 expect("POST /meetings carries allow_unpublished_to_gemini=true and the Gemini participant", !!startCall && startCall[2].allow_unpublished_to_gemini === true && startCall[2].participants.some((p) => p.harness === "gemini") && startCall[2].participants.length === 3);
+expect("...and the language of the screen, so the AIs answer in it", startCall[2].language === "ja");
 expect("each picked AI got its own point of view", new Set(startCall[2].participants.map((p) => p.perspective)).size === 3);
 expect("the permission is reset for the next meeting", !!consentBox() && consentBox().checked === false && startButton().disabled === true);
 await click(box("Geminiに相談する"));
@@ -267,4 +269,60 @@ expect("...and its reason is shown once opened", text().includes("失敗した�
 calls.length = 0;
 await clickText("この案で進める");
 expect("choosing an option -> POST /meetings/adopt", calls.some((c) => c[0] === "POST" && c[1].endsWith("/meetings/adopt") && c[2].meeting_id === "mtg-g" && c[2].option_id === "opt1"));
+
+// ---------------------------------------------------------------- Japanese / English
+const JA_CHARS = /[\u3040-\u30ff\u4e00-\u9fff]/;
+const langBtn = (code) => document.querySelector(`button[lang='${code}']`);
+const homeEn = async () => { await clickText("Back to home"); await settle(10); };
+await render("lang", noHalt);
+await home();
+expect("the header has a 日本語 / English switch, Japanese selected", !!langBtn("ja") && !!langBtn("en") && langBtn("ja").getAttribute("aria-pressed") === "true" && langBtn("en").getAttribute("aria-pressed") === "false");
+expect("the screen starts in Japanese", text().includes("何をしますか？") && document.documentElement.lang === "ja");
+calls.length = 0;
+await click(langBtn("en"));
+await settle(30);
+expect("choosing English switches the whole home screen", text().includes("What would you like to do?") && text().includes("Consult the AIs") && text().includes("Answer the AIs' questions") && !text().includes("何をしますか"));
+expect("...marks the page language and keeps the choice", document.documentElement.lang === "en" && dom.window.localStorage.getItem("gf-lang") === "en" && langBtn("en").getAttribute("aria-pressed") === "true");
+expect("...and asks for the data again (a demo serves its samples in the chosen language)", calls.some((c) => c[0] === "GET" && c[1].endsWith("/dashboard")));
+expect("no Japanese is left on the English home screen (apart from the 日本語 button)", !JA_CHARS.test(text().replace("日本語", "")));
+expect("the stop button and the situations are in English", text().includes("Stop all") && text().includes("At home") && text().includes("Out") && text().includes("Sleeping"));
+for (const [tile, needle] of [["Answer the AIs' questions", "A question from an AI"], ["See how the AIs are doing", "AI"], ["Look up news", "Summarise and save"], ["See the rules you decided", "policies you decided"], ["Details & settings", "Settings and records you rarely need"]]) {
+  await render("en-" + tile, noHalt); await homeEn(); await clickText(tile); await settle(20);
+  expect(`English: "${tile}" opens its screen`, text().includes(needle) && text().includes("Back to home"));
+}
+for (const [section, needle] of [["Notification & sending settings", "May project content be sent to the Gemini free tier?"], ["Cost and usage", "Token counts are measured by the provider"], ["Outside-AI run record", "The prompt text is not stored, only its hash"], ["Notification history", "held_resident = not sent because you are at home"], ["Decision record", "Original: "], ["List of AIs (technical)", "Real AI (live connection)"]]) {
+  await render("en-d-" + section, noHalt); await homeEn(); await clickText("Details & settings"); await settle(20); await clickText(section); await settle(20);
+  expect(`English details: ${section}`, text().includes(needle));
+}
+// English consult screen and the meeting request
+const listingEn = { ...listing, harnesses: listing.harnesses.map((x) => ({ ...x, reason: x.available ? "" : "Not signed in" })) };
+await render("en-consult", (p) => (String(p).includes("/meetings/harnesses") ? listingEn : noHalt));
+await homeEn(); await clickText("Consult the AIs"); await settle(30);
+expect("English consult screen: steps, AIs and where they run", text().includes("What do you want to consult about?") && text().includes("Who do you want to consult? (pick two or more)") && text().includes("Google's AI") && text().includes("outside Kiro Crew") && !!box("Consult Kiro") && !!box("Consult Gemini"));
+await setValue(document.querySelector("input[aria-label='What you want to consult about']"), "English topic", dom.window.HTMLInputElement.prototype, "input");
+await click(box("Consult Gemini"));
+expect("English: the Gemini permission box and its reason", text().includes("Allow sending this meeting's content to the Gemini free tier") && text().includes("(this meeting only)"));
+expect("English: the start button says why it is off", text().includes("To use Gemini, tick the permission to send below.") && buttons("Start this consultation")[0].disabled === true);
+const enBox = [...document.querySelectorAll("input[type=checkbox]")].find((el) => (el.getAttribute("aria-label") || "").startsWith("Allow sending this meeting"));
+await click(enBox);
+calls.length = 0;
+await click(buttons("Start this consultation")[0]);
+await settle(20);
+const enStart = calls.find((c) => c[0] === "POST" && c[1].endsWith("/meetings"));
+expect("English: the request carries language=en, the permission and English points of view", !!enStart && enStart[2].language === "en" && enStart[2].allow_unpublished_to_gemini === true && enStart[2].participants.every((p) => !JA_CHARS.test(p.perspective) && p.perspective.length > 0));
+// the minutes (records the backend wrote in Japanese get their fixed labels in English)
+await render("en-minutes", (p) => (String(p).includes("/meetings/harnesses") ? listingEn : minutes));
+await homeEn(); await clickText("Consult the AIs"); await settle(30);
+expect("English minutes: status, summary and the adoption prompt", text().includes("Results are in. Please choose") && text().includes("The Ghost's summary") && text().includes("Where opinions differ") && text().includes("Which option do we go with?"));
+expect("English minutes: the participant and the self-introduction warning", text().includes("Participant A (x / Gemini)") && text().includes("⚠️ Participant A: The self-introduction names another AI (Claude). The one that actually answered was Gemini"));
+expect("English minutes: the Gemini permission line", text().includes("Sending to the Gemini free tier: allowed for this meeting only"));
+await clickText("See the AIs' exchange");
+expect("English minutes: where each AI ran, and the model", text().includes("Gemini・Runs outside Kiro Crew (Gemini API free tier)・gemini-2.5-flash-lite"));
+// the choice survives a reload, and the switch goes back to Japanese
+await render("en-kept", noHalt);
+expect("the saved choice is used when the screen is opened again", text().includes("What would you like to do?") || text().includes("Answer the AIs' questions") || text().includes("A question from an AI"));
+await homeEn();
+await click(langBtn("ja"));
+await settle(30);
+expect("choosing 日本語 switches back and saves it", text().includes("何をしますか？") && dom.window.localStorage.getItem("gf-lang") === "ja" && document.documentElement.lang === "ja");
 process.exit(process.exitCode || 0);

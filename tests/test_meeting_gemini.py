@@ -318,11 +318,12 @@ class Route(unittest.TestCase):
     def test_only_a_literal_true_in_the_request_counts_as_permission(self):
         from backend import routes
 
-        seen = []
+        seen, langs = [], []
 
         class Sup:
             def run_brainstorm_meeting(self, **kw):
                 seen.append(kw["allow_unpublished_to_gemini"])
+                langs.append(kw["language"])
                 return {"id": "m"}
 
         for value, expected in ((True, True), ("true", False), (1, False), (None, False)):
@@ -333,6 +334,10 @@ class Route(unittest.TestCase):
         with mock.patch("backend.hooks.get_runtime", return_value=(None, None, Sup())):
             routes.dispatch_api_request("POST", "/meetings", {"topic": "t"})
         self.assertFalse(seen[-1], "missing means not allowed")
+        self.assertEqual(langs[-1], "ja", "no language sent means Japanese")
+        with mock.patch("backend.hooks.get_runtime", return_value=(None, None, Sup())):
+            routes.dispatch_api_request("POST", "/meetings", {"topic": "t", "language": "en"})
+        self.assertEqual(langs[-1], "en")
 
 
 if __name__ == "__main__":

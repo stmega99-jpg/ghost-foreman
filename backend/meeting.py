@@ -95,6 +95,15 @@ HARNESSES = {
 _ALIASES = {"": "kiro", "kas": "kiro", "default": "kiro"}
 RUNTIME_LABELS = {KIRO_RUNTIME: "Kiro Crew で実行", EXTERNAL_RUNTIME: "Kiro Crew 外で実行",
                   GEMINI_RUNTIME: "Kiro Crew 外で実行（Gemini API 無料枠）"}
+# Appended to every prompt of an English meeting. The prompts themselves stay as they are; the AI is asked to answer in
+# English, and to keep the JSON keys the program reads.
+ENGLISH_SUFFIX = "\n\nPlease write your whole answer in English. Keep the JSON keys exactly as given."
+
+
+def normalize_language(value: Any) -> str:
+    return "en" if str(value or "").strip().lower() == "en" else "ja"
+
+
 GEMINI_CONSENT_REQUIRED = ("Gemini を参加させるには、この会議の内容（議題・各AIの案など、未公開の制作情報を含みます）を"
                            "Gemini 無料枠に送る許可が必要です。無料枠に送った内容は、Google がサービス改善に使う場合があります。")
 
@@ -138,6 +147,7 @@ class MeetingEngine:
         self.external = external  # ExternalAIRunner (Claude Code / Codex outside Kiro Crew)
         self.gemini = gemini  # LlmRouter: its gemini_only() calls the Gemini free tier with no fallback
         self._gemini_allowed: Dict[str, bool] = {}  # meeting_id -> the human's per-meeting permission, while it runs
+        self._language: Dict[str, str] = {}  # meeting_id -> "ja" / "en": the language the AIs are asked to answer in
 
     # ------------------------------------------------------------------ participants
     def available_harnesses(self, refresh: bool = False) -> Dict[str, Any]:
@@ -190,12 +200,13 @@ class MeetingEngine:
             raise ValueError("いまこのPCで使えないAIがあります — " + " / ".join(problems))
 
     def start(self, project_id: str, topic: str, perspectives: Optional[List[Any]] = None, synthesizer_harness: str = "",
-              allow_unpublished_to_gemini: bool = False) -> Dict[str, Any]:
+              allow_unpublished_to_gemini: bool = False, language: str = "ja") -> Dict[str, Any]:
         """Start a meeting. *allow_unpublished_to_gemini* is the human's choice for THIS meeting only: whether its
         content may be sent to the Gemini free tier. Required when Gemini takes part; nothing else reads it."""
         self.adapter.halt.ensure_running(project_id=project_id)  # no meeting while a stop is in force
         if getattr(self.adapter, "live", None) is None:
             raise RuntimeError("Gateway未接続のため実エージェントの会議は開けません")
+        lang = normalize_language(language)
         specs = self.normalize_participants(perspectives)
         organiser = canonical(synthesizer_harness)
         if organiser not in HARNESSES:
@@ -218,6 +229,7 @@ class MeetingEngine:
             "live": True,
             "participants_detail": [person(s["harness"], speakers[i], s["perspective"]) for i, s in enumerate(specs)],
             "synthesizer": person(organiser, "幽霊（整理役）"),
+            "language": lang,
             "outside_kiro_crew": any(HARNESSES[h]["runtime"] != KIRO_RUNTIME for h in [s["harness"] for s in specs] + [organiser]),
             # The human's per-meeting answer, kept with the minutes. Applies to this meeting only.
             "gemini_consent": {"asked": with_gemini, "allowed": gemini_allowed, "scope": "この会議のみ",
@@ -230,6 +242,7 @@ class MeetingEngine:
                 " VALUES (?, ?, ?, ?, '[]', ?, 'running', ?)",
                 (meeting_id, project_id, topic, json.dumps(speakers, ensure_ascii=False), json.dumps(summary, ensure_ascii=False), _now_iso()),
             )
+        self._language[meeting_id] = lang
         threading.Thread(target=self._run, args=(meeting_id, project_id, topic, specs, speakers, organiser, gemini_allowed),
                          daemon=True, name=f"meeting-{meeting_id}").start()
         return self.get(meeting_id)
@@ -314,7 +327,9 @@ class MeetingEngine:
         """Ask every (who, prompt) at once and wait. *who* is {"harness", "slot" (Kiro only)}. Never raises except on a stop."""
         results: List[Dict[str, Any]] = []
         events: List[threading.Event] = []
+        suffix = ENGLISH_SUFFIX if self._language.get(meeting_id) == "en" else ""
         for i, (who, prompt) in enumerate(jobs):
+            prompt = prompt + suffix
             harness = who["harness"]
             out: Dict[str, Any] = {"reply": None, "error": "", "harness": harness, "runtime": HARNESSES[harness]["runtime"], "ran_on": "", "model": ""}
             done = threading.Event()
@@ -478,6 +493,7 @@ class MeetingEngine:
             self._finish(meeting_id, "failed", {"note": f"会議が失敗しました: {exc}"}, merge=True)
         finally:
             self._gemini_allowed.pop(meeting_id, None)  # the permission ends with the meeting
+            self._language.pop(meeting_id, None)
             for s in slots.values():
                 try:
                     self.adapter.retire_slot(s["id"])
