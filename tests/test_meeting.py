@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -24,7 +25,7 @@ from backend.store import ForemanStore  # noqa: E402
 
 
 def answer_for(prompt: str, who: str) -> str:
-    if "参加確認" in prompt:
+    if "参加確認" in prompt or "participation check" in prompt:
         return f"{who} です。準備OK"
     if "独立して具体案" in prompt:
         return json.dumps({"title": f"{who}の案", "proposal": f"{who} proposal", "pros": ["p"], "risks": ["r"]})
@@ -221,6 +222,9 @@ class Language(unittest.TestCase):
         self.assertEqual(m["summary"]["language"], "en")
         self.assertGreaterEqual(len(sent), 10, "participation check, ideas, critique and the summary, for every AI")
         self.assertTrue(all(p.endswith(meeting_mod.ENGLISH_SUFFIX) or meeting_mod.ENGLISH_SUFFIX in p for p in sent))
+        checks = [p for p in sent if "participation check" in p]
+        self.assertTrue(checks, "the participation check is asked in English")
+        self.assertFalse(any(re.search(r"[\u3040-\u30ff\u4e00-\u9fff]", p) for p in checks), "no Japanese in the English check")
         self.assertEqual(engine._language, {}, "nothing is kept after the meeting")
 
     def test_a_japanese_meeting_is_unchanged(self):

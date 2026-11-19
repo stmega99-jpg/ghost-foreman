@@ -69,6 +69,7 @@ const samples = [
   "送信できませんでした: boom",
   "緊急停止されたため、届いた回答は使いません",
   "［Kiro Crew 外で実行］ I am Codex",
+  "［Kiro Crew 外で実行（Gemini API 無料枠）］ I am Gemini",
 ];
 const left = samples.map(tb).filter((x) => JA.test(x));
 expect("fixed backend sentences in the minutes are translated", left.length === 0, left.slice(0, 2).join(" | "));

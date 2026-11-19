@@ -297,7 +297,7 @@ class SelfReport(unittest.TestCase):
         class ClaimsClaude(FakeGemini):
             def generate(self, prompt, **kw):
                 res = super().generate(prompt, **kw)
-                if "参加確認" in prompt:
+                if "参加確認" in prompt or "participation check" in prompt:
                     res.text = "Anthropic社が開発したAIアシスタント、Claudeです。準備OK"
                 return res
 
