@@ -151,6 +151,7 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             synthesizer_harness=payload.get("synthesizer_harness", ""),
             # Only a literal true counts as the human's permission for this meeting ("yes", 1, "true" do not).
             allow_unpublished_to_gemini=payload.get("allow_unpublished_to_gemini") is True,
+            language=payload.get("language") or "ja",
         )
         return 200, mtg
 

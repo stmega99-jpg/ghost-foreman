@@ -14,6 +14,8 @@ await page.emulate({
   viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
   userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
 });
+// The checks below read the Japanese screen: start from a saved Japanese choice (a headless browser says "en").
+await page.evaluateOnNewDocument(() => { try { if (!localStorage.getItem("gf-lang")) localStorage.setItem("gf-lang", "ja"); } catch (e) { /* storage blocked */ } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 let failed = 0;
@@ -60,6 +62,13 @@ await page.goto(BASE + "?q=test-deep-link", { waitUntil: "domcontentloaded", tim
 expect("   the app still opens (cached page + automatic refresh)", await waitText("Gateway実接続"));
 expect("   a new access cookie was issued by the refresh", (await cookies()).includes("mc_token_5476"));
 
+// 4b) the same app screen in English: the saved choice is what is used
+await page.evaluate(() => localStorage.setItem("gf-lang", "en"));
+await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 });
+expect("4b. English: the app screen opens in English", await waitText("What would you like to do?"));
+expect("    ...with the connection badge and the stop button in English", (await text()).includes("Connected (live Gateway connection)") && (await text()).includes("Stop all"));
+await page.evaluate(() => localStorage.setItem("gf-lang", "ja"));
+
 // 5) everything expired (no cookies at all)
 await delCookie("mc_token_5476", "/");
 await delCookie("mc_refresh_5476", "/api/auth");
@@ -85,6 +94,15 @@ await page.type('input[type="url"]', "https://evil.example/phish");
 await page.click("button");
 await new Promise((r) => setTimeout(r, 800));
 expect("7. a pasted address without a token is refused, no navigation", page.url() === before && (await text()).includes("ログイン用リンクが見つかりません"));
+
+// 8) the signed-out screen in English
+await page.evaluate(() => localStorage.setItem("gf-lang", "en"));
+await page.goto(BASE, { waitUntil: "domcontentloaded" });
+expect("8. English: the sign-in screen is shown in English", await waitText("Please sign in"));
+await page.type('input[type="url"]', "https://evil.example/phish");
+await page.click("button");
+await new Promise((r) => setTimeout(r, 800));
+expect("   and a pasted address without a token is refused in English", (await text()).includes("No sign-in link found"));
 
 expect("no JavaScript errors on the page", errors.length === 0, errors.slice(0, 2).join(" | "));
 await browser.close();

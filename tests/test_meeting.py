@@ -17,6 +17,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from backend import meeting as meeting_mod  # noqa: E402
 from backend.crew_adapter import CrewAdapter  # noqa: E402
 from backend.meeting import MEETING_AGENT, MeetingEngine  # noqa: E402
 from backend.store import ForemanStore  # noqa: E402
@@ -199,6 +200,37 @@ class SlotKeys(unittest.TestCase):
         second = adapter.create_managed_slot("proj-foreman", "会議A", "kiro", "会議参加者", "t", live=True, send_intro=False)
         self.assertEqual(first["id"], second["id"], "the visible slot id is reused")
         self.assertNotEqual(first["live_key"], second["live_key"], "but the Gateway never resumes the old session")
+
+
+class Language(unittest.TestCase):
+    """The screen's language is passed to the meeting, so the AIs answer in it (the program's own keys stay the same)."""
+
+    def run_meeting(self, language):
+        store, adapter, live, ext, engine = make()
+        sent = []
+        real_run, real_send = ext.run, live.send
+        ext.run = lambda h, prompt, **kw: (sent.append(prompt), real_run(h, prompt, **kw))[1]
+        live.send = lambda key, text: (sent.append(text), real_send(key, text))[1]
+        mid = engine.start("proj-foreman", "議題", PARTS, synthesizer_harness="kiro", **({} if language is None else {"language": language}))["id"]
+        m = wait(engine, mid)
+        return m, sent, engine
+
+    def test_an_english_meeting_asks_every_ai_in_every_round_to_answer_in_english(self):
+        m, sent, engine = self.run_meeting("en")
+        self.assertEqual(m["status"], "awaiting_human_adoption", m["summary"].get("note"))
+        self.assertEqual(m["summary"]["language"], "en")
+        self.assertGreaterEqual(len(sent), 10, "participation check, ideas, critique and the summary, for every AI")
+        self.assertTrue(all(p.endswith(meeting_mod.ENGLISH_SUFFIX) or meeting_mod.ENGLISH_SUFFIX in p for p in sent))
+        self.assertEqual(engine._language, {}, "nothing is kept after the meeting")
+
+    def test_a_japanese_meeting_is_unchanged(self):
+        for language in ("ja", None, "fr", "", "EN ", 1):
+            m, sent, engine = self.run_meeting(language)
+            if str(language).strip().lower() == "en":
+                self.assertEqual(m["summary"]["language"], "en")
+                continue
+            self.assertEqual(m["summary"]["language"], "ja", language)
+            self.assertFalse(any("in English" in p for p in sent), language)
 
 
 class MeetingAgent(unittest.TestCase):
