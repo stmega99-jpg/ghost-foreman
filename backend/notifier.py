@@ -27,7 +27,8 @@ logger = logging.getLogger("ghost-foreman.notifier")
 
 CHANNEL_DECISION = "decision-needed"
 CHANNEL_DIGEST = "digest"
-APP_PAGE = "/apps/ghost-foreman"
+# Opens Ghost Foreman's own phone page (not the Kiro Crew dashboard).
+APP_PAGE = "/api/apps/ghost-foreman/m/"
 DIGEST_CHECK_SECS = 30.0
 NOTIFY_STATUSES = ("needs_human", "needs_human_approval", "held_spec_violation")
 
@@ -145,6 +146,17 @@ class Notifier:
             return "failed"
         self._log(question_id, "decision", title, body, "sent", json.dumps(result, ensure_ascii=False)[:250] if result else "")
         return "sent"
+
+    def send_test(self) -> Dict[str, Any]:
+        """A harmless test push the human asked for. Ignores the mode, never touches a question."""
+        title, body = "👻 Ghost Foreman テスト通知", "このメッセージが届けば、iPhoneへの通知は成功です。タップするとアプリが開きます。"
+        try:
+            result = self._push({"channel": CHANNEL_DECISION, "title": title, "body": body, "priority": "default", "group_key": "gf-test", "url": APP_PAGE})
+        except Exception as exc:  # noqa: BLE001
+            self._log("*", "test", title, body, "failed", str(exc))
+            return {"ok": False, "error": str(exc)}
+        self._log("*", "test", title, body, "sent", json.dumps(result, ensure_ascii=False)[:250] if result else "")
+        return {"ok": True, "result": result}
 
     # ------------------------------------------------------------------ sleep digest
     def send_digest_if_due(self) -> Optional[int]:

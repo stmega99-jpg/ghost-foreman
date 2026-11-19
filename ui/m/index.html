@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Ghost Foreman</title>
+  <!-- Ghost Foreman's own manifest, so the Home Screen icon opens THIS page and not the Kiro Crew dashboard.
+       It has no start_url on purpose: the installed app then starts at the address it was added from, i.e. the
+       sign-in link, which lets it sign in inside its own storage (iOS does not share cookies with Safari). -->
+  <link rel="manifest" href="/apps/ghost-foreman/ui/m/manifest.json" crossorigin="use-credentials" />
+  <link rel="apple-touch-icon" href="/apps/ghost-foreman/ui/m/icon-180.png" />
+  <link rel="icon" type="image/png" href="/apps/ghost-foreman/ui/m/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Ghost Foreman" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0d0b18" />
+  <style>
+    html, body { margin: 0; background: #0d0b18; color: #f3e8ff; -webkit-text-size-adjust: 100%; font-family: system-ui, sans-serif; }
+    body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+    .box { margin: 16px; padding: 16px; background: #17122a; border: 1px solid #2e1f47; border-radius: 12px; line-height: 1.6; }
+    .box h2 { margin: 0 0 8px; font-size: 18px; }
+    .box ol { padding-left: 20px; margin: 8px 0; }
+    .box input { width: 100%; box-sizing: border-box; margin: 8px 0; padding: 10px; font-size: 16px; border-radius: 8px; border: 1px solid #2e1f47; background: #0d0b18; color: #f3e8ff; }
+    .box button { padding: 10px 14px; font-size: 16px; border-radius: 8px; border: 1px solid #a78bfa; background: #3b2a66; color: #f3e8ff; }
+    .mute { color: #a89bc4; font-size: 13px; }
+    .err { color: #f87171; }
+  </style>
+  <!-- React is bundled with this app (ui/m/vendor/react.mjs, one module for React + ReactDOM so they share one
+       instance); the Gateway's /vendor/ stubs only work inside the Kiro Crew dashboard. No CDN is used. The app SDK is
+       replaced by a small standalone version that talks to this app's own API with the signed-in session. -->
+  <script type="importmap">
+    {"imports": {
+      "react": "/apps/ghost-foreman/ui/m/vendor/react.mjs",
+      "react-dom/client": "/apps/ghost-foreman/ui/m/vendor/react.mjs",
+      "@kirocrew/app-sdk": "/api/apps/ghost-foreman/m/sdk.mjs"
+    }}
+  </script>
+</head>
+<body>
+  <div id="install"></div>
+  <div id="root"><div class="box">👻 Ghost Foreman 起動中…</div></div>
+  <script type="module">
+    const BASE = "/api/apps/ghost-foreman/m/";
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    const root = document.getElementById("root");
+    const el = (tag, attrs = {}, ...kids) => {
+      const n = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) k === "text" ? (n.textContent = v) : n.setAttribute(k, v);
+      for (const c of kids) n.append(c);
+      return n;
+    };
+
+    // Keep the cached copy of this page so it opens even after the access cookie has expired.
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register(BASE + "sw.js", { scope: BASE }).catch(() => {});
+
+    // In Safari (not yet on the Home Screen): explain how to install. The sign-in link stays in the address bar on
+    // purpose, because "Add to Home Screen" saves this address and the installed app signs in with it once.
+    if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+      document.getElementById("install").append(
+        el("div", { class: "box" },
+          el("h2", { text: "📲 ホーム画面に追加してください" }),
+          el("ol", {},
+            el("li", { text: "画面下の 共有ボタン（□に↑）を押す" }),
+            el("li", { text: "「ホーム画面に追加」を選び、「追加」を押す" }),
+            el("li", { text: "ホーム画面の Ghost Foreman アイコンから開く（すぐに開いてください。このリンクには有効期限があります）" })),
+          el("div", { class: "mute", text: "ホーム画面から開いたあと、「⚙️ 設定・費用」で通知をオンにできます。" })));
+    } else if (standalone) {
+      // Inside the installed app there is no address bar; drop the used link from the history entry anyway.
+      const u = new URL(location.href);
+      if (u.searchParams.has("token")) { u.searchParams.delete("token"); history.replaceState(null, "", u.pathname + u.search); }
+    }
+
+    // Web Push helper used by the app's settings card. iOS allows it only from the installed app, and only from a tap.
+    const b64ToBytes = (s) => { const raw = atob((s + "=".repeat((4 - (s.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(raw, (c) => c.charCodeAt(0)); };
+    const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+    window.__gfPush = {
+      async status() {
+        const out = { supported: pushSupported(), standalone, permission: "Notification" in window ? Notification.permission : "unsupported", subscribed: false };
+        if (out.supported) { const reg = await navigator.serviceWorker.getRegistration("/"); out.subscribed = !!(reg && (await reg.pushManager.getSubscription())); }
+        return out;
+      },
+      async enable() {
+        if (!pushSupported()) throw new Error(standalone ? "この端末では通知を使えません（iOS 16.4 以降が必要です）" : "通知は、ホーム画面に追加したアプリから開いたときだけオンにできます");
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") throw new Error("通知が許可されませんでした（iPhoneの設定アプリ → 通知 → Ghost Foreman で許可できます）");
+        // Pushes are delivered by Kiro Crew's own service worker (scope "/"), which shows them and opens the link.
+        const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        await navigator.serviceWorker.ready;
+        const k = await fetch("/api/notifications/push/vapid-public-key", { credentials: "same-origin" });
+        if (!k.ok) throw new Error("通知用の鍵を取得できませんでした (" + k.status + ")");
+        const { publicKey } = await k.json();
+        const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) }));
+        const r = await fetch("/api/notifications/push/subscribe", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sub.toJSON()) });
+        if (!r.ok) throw new Error("購読の登録に失敗しました (" + r.status + ")");
+        return true;
+      },
+    };
+    window.__gfStandalone = true;
+
+    // Signed in? If the access cookie has expired, renew it once with the 30-day refresh cookie.
+    async function signedIn() {
+      const ping = () => fetch(BASE + "ping", { credentials: "same-origin", cache: "no-store" }).then((r) => r.ok).catch(() => false);
+      if (await ping()) return true;
+      // Inline on purpose: the SDK module itself sits behind the expired cookie.
+      const refreshed = await fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: "{}" }).then((r) => r.ok).catch(() => false);
+      return refreshed && (await ping());
+    }
+
+    function showSignIn(message) {
+      const input = el("input", { type: "url", placeholder: "https://…?token=… を貼り付け", autocomplete: "off", autocapitalize: "off" });
+      const err = el("div", { class: "err" });
+      const go = el("button", { text: "サインイン" });
+      go.onclick = () => {
+        // Only the token value is taken from what was pasted; we never navigate to a pasted address.
+        const m = String(input.value).match(/[?&#]token=([A-Za-z0-9._-]{20,})/);
+        if (!m) { err.textContent = "ログイン用リンクが見つかりません。PCで表示したリンク全体を貼り付けてください。"; return; }
+        location.replace(BASE + "?token=" + encodeURIComponent(m[1]));
+      };
+      root.replaceChildren(el("div", { class: "box" },
+        el("h2", { text: "🔑 サインインしてください" }),
+        el("div", { text: message || "サインインの有効期限が切れました。" }),
+        el("ol", {},
+          el("li", { text: "PCで scripts\\phone-link.ps1 を実行し、表示されたリンクを iPhone に送る（AirDropなど）" }),
+          el("li", { text: "リンクを長押しして「コピー」し、下の欄に貼り付ける" })),
+        input, go, err,
+        el("div", { class: "mute", text: "ホーム画面のアプリと Safari はログイン情報が別々です。このアプリの中でサインインしてください。" })));
+    }
+
+    try {
+      if (!(await signedIn())) {
+        showSignIn();
+      } else {
+        const React = (await import("react")).default;
+        const { createRoot } = await import("react-dom/client");
+        const App = (await import(BASE + "app.mjs")).default;
+        createRoot(root).render(React.createElement(App));
+      }
+    } catch (e) {
+      root.replaceChildren(el("div", { class: "box" }, el("h2", { text: "読み込みに失敗しました" }), el("div", { class: "err", text: String(e) })));
+    }
+  </script>
+</body>
+</html>

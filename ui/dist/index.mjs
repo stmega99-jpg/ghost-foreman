@@ -229,6 +229,39 @@ function Audit({ d }) {
 }
 
 // ------------------------------------------------------------------ settings
+// Only on Ghost Foreman's own phone page (ui/m/index.html sets window.__gfPush). Inside the Kiro Crew dashboard the
+// host's own notification settings are used instead.
+function PhoneNotifications({ call }) {
+  const push = typeof window !== "undefined" ? window.__gfPush : null;
+  const [st, setSt] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => { if (push) push.status().then(setSt).catch((e) => setMsg(String(e.message || e))); }, [push]);
+  useEffect(load, [load]);
+  if (!push) return null;
+  const enable = async () => {
+    setBusy(true); setMsg("");
+    try { await push.enable(); setMsg("通知をオンにしました。「テスト通知を送る」で確認できます。"); }
+    catch (e) { setMsg(String((e && e.message) || e)); }
+    setBusy(false); load();
+  };
+  const test = async () => {
+    setBusy(true); setMsg("");
+    try { const r = await call("POST", "/notify/test", {}); setMsg(r && r.ok ? "テスト通知を送りました。数秒で届きます（アプリを閉じると見やすいです）。" : "送信に失敗しました: " + ((r && r.error) || "")); }
+    catch (e) { setMsg(String((e && e.message) || e)); }
+    setBusy(false);
+  };
+  const on = st && st.subscribed && st.permission === "granted";
+  return h("div", { style: S.card },
+    h("h3", { style: { marginTop: 0 } }, "📲 このiPhoneへの通知"),
+    st ? h("div", null, on ? "オン（判断待ちが出たらこの端末に通知します）" : st.standalone ? "オフ" : "ホーム画面に追加したアプリから開くと、オンにできます") : h("div", null, "確認中…"),
+    h("div", { style: { ...S.row, marginTop: 8 } },
+      !on ? h("button", { style: S.btnOk, disabled: busy || !(st && st.standalone), onClick: enable }, "🔔 通知をオンにする") : null,
+      on ? h("button", { style: S.btn, disabled: busy, onClick: test }, "テスト通知を送る") : null),
+    msg ? h("div", { style: { marginTop: 6 } }, msg) : null,
+    h("div", { style: S.mute }, "通知がいつ届くかは、上部のモード（離席=すぐ / 常駐=送らない / おやすみ=朝にまとめて）で変わります。テスト通知はモードに関係なく送ります。"));
+}
+
 function Settings({ d, call }) {
   const allow = !!(d.mode_state && d.mode_state.allow_unpublished_to_free_tier);
   const u = d.usage || { totals: [] };
@@ -239,6 +272,7 @@ function Settings({ d, call }) {
     call("POST", "/mode", { allow_unpublished_to_free_tier: want });
   };
   return h("div", null,
+    h(PhoneNotifications, { call }),
     h("div", { style: S.card },
       h("h3", { style: { marginTop: 0 } }, "🔒 制作内容の Gemini 無料枠への送信"),
       h("div", null, "AIからの質問や確定ルールの本文を、判定のために Gemini の無料枠へ送ってよいかを決めます。"),

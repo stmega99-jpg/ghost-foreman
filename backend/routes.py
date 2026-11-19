@@ -11,10 +11,36 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Tuple
 
 from .halt import EmergencyStopped
 from .store import _now_iso as _now
+
+
+# Files served as Ghost Foreman's own phone page (see ui/m/). Fixed allowlist: no path is ever built from the request.
+_APP_ROOT = Path(__file__).resolve().parent.parent
+_HTML = "text/html; charset=utf-8"
+_JS = "application/javascript; charset=utf-8"
+_STATIC_FILES: Dict[str, Tuple[str, str]] = {
+    "/m": ("ui/m/index.html", _HTML),
+    "/m/": ("ui/m/index.html", _HTML),
+    "/m/sdk.mjs": ("ui/m/sdk.mjs", _JS),
+    "/m/app.mjs": ("ui/dist/index.mjs", _JS),  # the same React UI the dashboard loads
+    "/m/sw.js": ("ui/m/sw.js", _JS),  # scope = /api/apps/ghost-foreman/m/ (its own directory)
+}
+
+
+def _static_handler(rel_path: str) -> Callable[[Any, Any], Awaitable[Any]]:
+    filename, content_type = _STATIC_FILES[rel_path]
+
+    async def _handler(request: Any, app_ctx: Any = None) -> Any:
+        from aiohttp import web
+
+        data = await asyncio.to_thread((_APP_ROOT / filename).read_bytes)
+        return web.Response(body=data, headers={"Content-Type": content_type, "Cache-Control": "no-store"})
+
+    return _handler
 
 
 @dataclass
@@ -186,6 +212,14 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             return 422, {"error": f"{type(exc).__name__}: {exc}", "code": code}
         return 200, item
 
+    if method == "GET" and rel_path == "/m/ping":
+        # Cheap "am I signed in?" check for the phone page (the Gateway answers 401/403 before this if not).
+        return 200, {"ok": True}
+
+    if method == "POST" and rel_path == "/notify/test":
+        # The human asked for a test push (the phone app's button): sent regardless of mode, and logged.
+        return 200, supervisor.notifier.send_test()
+
     if method == "POST" and rel_path == "/stop":
         res = adapter.stop_control(
             scope=payload.get("scope", "all"),
@@ -263,8 +297,12 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
         ("GET", "/slots/history"),
         ("GET", "/usage"),
         ("POST", "/news/summarize"),
+        ("GET", "/m/ping"),
+        ("POST", "/notify/test"),
         ("POST", "/stop"),
         ("POST", "/mode"),
         ("POST", "/desktop-lease"),
     ]
-    return [ForemanRoute(method=m, path=p, handler=_make_handler(p)) for m, p in route_specs]
+    routes = [ForemanRoute(method=m, path=p, handler=_make_handler(p)) for m, p in route_specs]
+    routes += [ForemanRoute(method="GET", path=p, handler=_static_handler(p)) for p in _STATIC_FILES]
+    return routes

@@ -111,9 +111,12 @@ The Gateway listens on `127.0.0.1` only. To reach it from a phone **without open
 4. `tailscale serve --bg 5476` publishes `https://<pc-name>.<tailnet>.ts.net/` inside the tailnet. Check with `tailscale serve status` that it says *(tailnet only)* and that Funnel is off.
 5. `scripts\phone-link.ps1` copies (`kirocrew token` also prints the tailnet link on its second line). With `-Qr` it shows a QR code in a window on the PC instead (`pip install segno`; nothing is written to disk; the window closes by itself) a sign-in link for the iPhone to the clipboard (it is never printed). The link contains an access token (20 h by default, `-Ttl 2h` for shorter): send it only to your own phone.
 
-**iPhone**
+**iPhone (Ghost Foreman as its own Home Screen app)**
 1. Install the Tailscale app and sign in with the same account; keep the VPN switch on.
-2. Open the link in Safari, then Share → **Add to Home Screen**.
-3. Open Ghost Foreman from the Home Screen icon (the installed web app), go to Kiro Crew *Settings → Notifications* and allow notifications. iOS only allows this from the installed web app, over HTTPS.
+2. On the PC run `scripts\phone-link.ps1 -Qr -Ttl 1h` and scan the QR code with the iPhone camera. It opens Ghost Foreman's own page (`/api/apps/ghost-foreman/m/`), not the Kiro Crew dashboard.
+3. In Safari: Share → **Add to Home Screen** → Add, then open the new Ghost Foreman icon right away (the link expires after `-Ttl`).
+4. In the app: **⚙️ 設定・費用 → 通知をオンにする**, then **テスト通知を送る**.
+
+How it stays signed in: iOS gives a Home Screen app its own storage, separate from Safari, so the app signs in once with the link it was added from and then renews itself with the Gateway's 30-day refresh cookie. A small service worker (scope `/api/apps/ghost-foreman/m/`) keeps the page so it can do that renewal after the 20-hour access cookie has expired; it caches only the page and its two modules, never API data. If everything has expired the app shows a sign-in screen where a new link can be pasted. React is bundled in `ui/m/vendor/react.mjs` (rebuild: `ui/m/vendor/build.mjs`); no CDN is used. The browser end-to-end test is `tests/ui/phone_e2e.mjs`.
 
 Notes: push subscriptions belong to the address they were created on, so subscribe again after switching to the `ts.net` address. `tailscale serve reset` removes the publication. Never run `tailscale funnel` for this app.

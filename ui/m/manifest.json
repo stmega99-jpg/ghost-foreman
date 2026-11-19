@@ -1,0 +1,15 @@
+{
+  "name": "Ghost Foreman",
+  "short_name": "Ghost Foreman",
+  "description": "Your agents work. You have a life. 幽霊現場監督",
+  "lang": "ja",
+  "scope": "/api/apps/ghost-foreman/m/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0b18",
+  "theme_color": "#0d0b18",
+  "icons": [
+    { "src": "/apps/ghost-foreman/ui/m/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/apps/ghost-foreman/ui/m/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
