@@ -1,11 +1,15 @@
-﻿# Builds the one-time sign-in link for the iPhone and copies it to the clipboard (it is NOT printed).
+﻿# Builds the sign-in link for the iPhone and copies it to the clipboard (it is NOT printed).
+# By default the link opens Ghost Foreman's own phone page (/api/apps/ghost-foreman/m/), which can be added to the
+# Home Screen as its own app. -Dashboard opens the Kiro Crew dashboard instead.
+# The link can be used more than once until it expires (-Ttl): the installed Home Screen app signs in with it once,
+# then keeps itself signed in with a 30-day refresh cookie. Use a short -Ttl (e.g. 1h) when installing.
 #   .\scripts\phone-link.ps1            -> link valid for 20 hours (default)
 #   .\scripts\phone-link.ps1 -Ttl 2h    -> shorter
 #   .\scripts\phone-link.ps1 -Qr        -> show a QR code in a window on this PC instead of using the clipboard
 #                                          (needs `pip install segno`; nothing is written to disk; closes after 5 min / Esc)
 # The link contains a dashboard access token: treat it like a password. Send it to your own iPhone only
 # (AirDrop, Notes via iCloud, or paste it into Safari through Universal Clipboard).
-param([string]$Ttl = "20h", [switch]$Qr, [int]$QrSeconds = 300)
+param([string]$Ttl = "20h", [switch]$Qr, [int]$QrSeconds = 300, [switch]$Dashboard)
 
 $ErrorActionPreference = "Stop"
 $ts = "C:\Program Files\Tailscale\tailscale.exe"
@@ -24,7 +28,8 @@ $env:PYTHONUTF8 = "1"
 $line = (kirocrew token --ttl $Ttl 2>$null | Select-Object -Last 1)
 if (-not $line -or $line -notmatch "token=") { throw "kirocrew token failed. Is the gateway running?" }
 $tokenPart = ($line -split "\?token=", 2)[1].Trim()
-$url = "https://$dns/?token=$tokenPart"
+$path = if ($Dashboard) { "/" } else { "/api/apps/ghost-foreman/m/" }
+$url = "https://$dns$path" + "?token=$tokenPart"
 if ($Qr) {
     # The link goes to the viewer through an environment variable (not the command line) and is cleared right after.
     $env:GF_QR_TEXT = $url
