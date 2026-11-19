@@ -164,4 +164,14 @@ await act(async () => { root.render(React.createElement(App, { key: "minutes" })
 await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
 await clickText("AI会議");
 expect("the minutes say Gemini was allowed for this meeting only", text().includes("Gemini 無料枠への送信: この会議だけ許可") && text().includes("gemini-2.5-flash-lite"));
+expect("no self-introduction warning when it matches", !text().includes("自己紹介に別のAIの名前"));
+// a participant that called itself another AI is flagged, while still shown as the AI that was actually called
+const wrongName = JSON.parse(JSON.stringify(withMinutes));
+wrongName.meetings[0].summary.participants_detail[0].self_report_check = { status: "other_name", names: ["Claude"], note: "自己紹介に別のAIの名前（Claude）が含まれています。実際に答えたのは Gemini です（呼び出し先で確認）。" };
+globalThis.__api.get = async (p) => JSON.parse(JSON.stringify(String(p).includes("/meetings/harnesses") ? listing : wrongName));
+await act(async () => { root.render(React.createElement(App, { key: "wrongname" })); });
+await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+await clickText("AI会議");
+expect("a wrong self-introduction is flagged in the minutes", text().includes("⚠️ 参加者A: 自己紹介に別のAIの名前（Claude）が含まれています。実際に答えたのは Gemini です"));
+expect("...and the participant is still shown as Gemini, verified", text().includes("Gemini・Kiro Crew 外で実行（Gemini API 無料枠）・gemini-2.5-flash-lite") && !text().includes("（未確認）"));
 process.exit(process.exitCode || 0);
