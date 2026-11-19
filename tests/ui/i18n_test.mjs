@@ -52,4 +52,26 @@ dom.window.localStorage.removeItem("gf-lang");
 expect("with nothing saved, a non-Japanese browser gets English", detectLang() === "en");
 Object.defineProperty(dom.window.navigator, "language", { value: "ja-JP", configurable: true });
 expect("with nothing saved, a Japanese browser gets Japanese", detectLang() === "ja");
+// Fixed sentences the backend writes into the minutes: none may stay Japanese on an English screen.
+mod.I18N.setLangForTest("en");
+const tb = mod.I18N.tb;
+const samples = [
+  "【Plan】Do it（利点: fast / リスク: cost）",
+  "批評: too slow → 改善案: use a cache",
+  "（返答なし: Gemini が回答できませんでした）",
+  "会議が失敗しました: 参加できないAIがあるため会議を始めませんでした — 参加者A（x／Codex）: 時間内に返答がありませんでした / 幽霊（整理役／Kiro）: （返答なし: 緊急停止中のため送信しません）",
+  "参加者から案が得られませんでした",
+  "Gateway再起動により会議が中断されました。途中までの発言は保存されています。",
+  "幽霊の論点整理を得られませんでした。各ラウンドの発言をご確認ください。",
+  "整理役の返答が構造化されていませんでした。採用は保存のみ可能です。",
+  "この会議のみ",
+  "この会議の内容を Gemini 無料枠に送ることを許可",
+  "送信できませんでした: boom",
+  "緊急停止されたため、届いた回答は使いません",
+  "［Kiro Crew 外で実行］ I am Codex",
+];
+const left = samples.map(tb).filter((x) => JA.test(x));
+expect("fixed backend sentences in the minutes are translated", left.length === 0, left.slice(0, 2).join(" | "));
+expect("AI-written words stay as written", tb("批評: これは日本語 → 改善案: そのまま") === "Critique: これは日本語 → Improved proposal: そのまま");
+mod.I18N.setLangForTest("ja");
 process.exit(process.exitCode || 0);

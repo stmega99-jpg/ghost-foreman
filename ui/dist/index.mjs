@@ -301,26 +301,53 @@ const EN_B = {
 const EN_BP = [
   [/^参加者([A-E])（(.*)／(.*)）$/, (m) => `Participant ${m[1]} (${m[2]} / ${m[3]})`],
   [/^幽霊（整理役／(.*)）$/, (m) => `Ghost (organiser / ${m[1]})`],
-  [/^会議が失敗しました: (.*)$/, (m) => `The meeting failed: ${m[1]}`],
-  [/^会議を中止しました: (.*)$/, (m) => `The meeting was cancelled: ${m[1]}`],
+  [/^会議が失敗しました: (.*)$/, (m) => `The meeting failed: ${tb(m[1])}`],
+  [/^会議を中止しました: (.*)$/, (m) => `The meeting was cancelled: ${tb(m[1])}`],
   [/^緊急停止されたため、会議を中止しました$/, () => "The meeting was cancelled because of the emergency stop"],
   [/^自己紹介に別のAIの名前（(.*)）が含まれています。実際に答えたのは (.*) です（呼び出し先で確認）。$/, (m) => `The self-introduction names another AI (${m[1]}). The one that actually answered was ${m[2]} (confirmed from what was called).`],
   [/^自己紹介で (.*) と名乗っていません。実際に答えたのは (.*) です（呼び出し先で確認）。$/, (m) => `The self-introduction does not say ${m[1]}. The one that actually answered was ${m[2]} (confirmed from what was called).`],
   [/^Gemini を参加させるには、この会議の内容.*送る許可が必要です。.*$/, () => "To let Gemini take part, you must allow sending this meeting's content (which includes unpublished project information) to the Gemini free tier. Google may use what is sent to the free tier to improve its services."],
 ];
-function tb(s) {
+// Fixed sentences the backend puts inside its records (replaced wherever they appear; the AI's own words are left alone).
+const EN_FRAG = [
+  ["参加できないAIがあるため会議を始めませんでした — ", "The meeting did not start because some AIs could not take part: "],
+  ["参加者から案が得られませんでした", "No participant produced a proposal"],
+  ["Gateway再起動により会議が中断されました。途中までの発言は保存されています。", "The meeting was interrupted by a Gateway restart. What was said so far is saved."],
+  ["幽霊の論点整理を得られませんでした。各ラウンドの発言をご確認ください。", "The Ghost could not produce a summary. Please read what was said in each round."],
+  ["整理役の返答が構造化されていませんでした。採用は保存のみ可能です。", "The organiser's answer was not in the expected structure. Only saving is possible."],
+  ["【模擬】Gateway未接続の固定サンプルです。実AIによる会議ではありません。人間が採用ボタンを押すまで制作には移しません。", "[Simulated] A fixed sample, because no Gateway is connected. This is not a meeting held by real AIs. Nothing is built until a human adopts an option."],
+  ["（返答なし: ", "(no answer: "],
+  ["返答なし", "no answer"],
+  ["時間内に返答がありませんでした", "No answer within the time limit"],
+  ["送信できませんでした: ", "Could not send: "],
+  ["Gemini が設定されていません", "Gemini is not set up"],
+  ["緊急停止中のため送信しません", "Not sent because an emergency stop is in force"],
+  ["緊急停止されたため、届いた回答は使いません", "The emergency stop was used, so the answer that arrived is discarded"],
+  ["Gemini が回答できませんでした", "Gemini could not answer"],
+  ["この会議のみ", "this meeting only"],
+  ["この会議の内容を Gemini 無料枠に送ることを許可", "Allowed sending this meeting's content to the Gemini free tier"],
+];function tb(s) {
   if (LANG !== "en" || typeof s !== "string") return s;
   if (EN_B[s] !== undefined) return EN_B[s];
   for (const [re, fn] of EN_BP) { const m = s.match(re); if (m) return fn(m); }
   // A participation-check line: "［where・model］ answer　⚠️ note" (the answer itself is the AI's own words).
   const warn = s.indexOf("　⚠️ ");
   if (warn > 0) return tb(s.slice(0, warn)) + "  ⚠️ " + tb(s.slice(warn + 4));
-  return s
+  const r = (re, fn) => { const m = s.match(re); return m ? fn(m) : null; };
+  const shaped = r(/^【(.*?)】([\s\S]*)（利点: ([\s\S]*) \/ リスク: ([\s\S]*)）$/, (m) => `[${m[1]}] ${m[2]} (Pros: ${m[3]} / Risks: ${m[4]})`)
+    || r(/^批評: ([\s\S]*) → 改善案: ([\s\S]*)$/, (m) => `Critique: ${m[1]} → Improved proposal: ${m[2]}`);
+  if (shaped) return shaped;
+  let out = s;
+  out = out.replace(/（返答なし: ([^（）]*)）/g, "(no answer: $1)")
+    .replace(/参加者([A-E])（([^（）]*)／([^（）]*)）/g, "Participant $1 ($2 / $3)")
+    .replace(/幽霊（整理役／([^（）]*)）/g, "Ghost (organiser / $1)");
+  for (const [ja, en] of EN_FRAG) out = out.split(ja).join(en);
+  return out
     .replace(/［([^］]*)］/g, (all, inner) => `[${inner.replace(/^Kiro Crew 外で実行/, "Outside Kiro Crew").replace(/^Kiro Crew で実行/, "Inside Kiro Crew").replace("Gemini API 無料枠", "Gemini API free tier")}]`)
     .replace(/（参加できません: ([^）]*)）/g, "(cannot take part: $1)");
 }
 const shortName = (s) => (LANG === "en" ? tb(s).split(" (")[0] : String(s).split("（")[0]);
-export const I18N = { EN, EN_B, detectLang };
+export const I18N = { EN, EN_B, detectLang, tb, setLangForTest: (l) => { LANG = l; } };
 
 // ------------------------------------------------------------------ look
 const C = { bg: "#0d0b18", card: "#17122a", border: "#2e1f47", text: "#f3e8ff", mute: "#a89bc4", accent: "#a78bfa", ok: "#34d399", warn: "#fbbf24", bad: "#f87171" };
@@ -531,9 +558,9 @@ function MeetingCard({ m, d, call }) {
     m.status === "failed" && sm.note ? h("div", { style: { ...S.log, borderColor: C.bad } }, tb(sm.note)) : null,
     sm.consensus
       ? h("div", { style: { ...S.log, borderColor: C.accent } },
-          h("strong", null, t("👻 幽霊のまとめ")), h("div", null, sm.consensus),
-          sm.conflict_points ? h("div", { style: { color: C.warn, marginTop: 4 } }, t("意見が分かれたところ: {x}", { x: sm.conflict_points })) : null,
-          sm.unresolved ? h("div", { style: { marginTop: 4 } }, t("まだ決まっていないこと: {x}", { x: sm.unresolved })) : null)
+          h("strong", null, t("👻 幽霊のまとめ")), h("div", null, tb(sm.consensus)),
+          sm.conflict_points ? h("div", { style: { color: C.warn, marginTop: 4 } }, t("意見が分かれたところ: {x}", { x: tb(sm.conflict_points) })) : null,
+          sm.unresolved ? h("div", { style: { marginTop: 4 } }, t("まだ決まっていないこと: {x}", { x: tb(sm.unresolved) })) : null)
       : null,
     m.status === "awaiting_human_adoption"
       ? h("div", { style: { marginTop: 8 } },
