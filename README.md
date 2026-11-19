@@ -71,14 +71,17 @@ kirocrew app enable ghost-foreman
 ```
 Open the Kiro Crew dashboard → *Apps → Ghost Foreman*. When you update the app later, restart the Gateway (`kirocrew restart`) so the Python code reloads. You may be asked to approve the app's permissions in the dashboard.
 
-### B. Without Kiro Crew (simulated only)
+### B. Demo with sample data (no Kiro Crew, no accounts)
 ```bash
+python dev_server.py               # http://127.0.0.1:8765/  (opens demo/index.html)
 python verify_phase1_and_2.py      # 8 acceptance suites
 python -m unittest discover -s tests
-python dev_server.py               # http://127.0.0.1:8765/apps/ghost-foreman
 ```
-`dev_server.py` runs the backend against **simulated** slots with demo data. It serves the older single-file screen (`ui/index.html`), not the current app screen.
-
+`demo/index.html` runs the **same screen as the real app** (`ui/dist/index.mjs`, Japanese and English) on **made-up sample data** that lives in the browser (`demo/engine.mjs`). It is labelled "Demo sample (simulated)" on screen and is **not live**: no AI is called, and nothing you type is sent anywhere.
+- The page's Content-Security-Policy is `connect-src 'none'`, so the page cannot open any connection (fetch, XHR, WebSocket), even to its own server. `dev_server.py` only hands out static files from `demo/` and `ui/`.
+- It cannot reach an AI contract, an API key or the owner's PC, because it has no code path to them. Questions, the emergency stop (only a person can lift it), the 4-AI meeting (including the per-meeting Gemini permission rule) and the language switch all work on the sample data. The meeting's answers are fixed sample text.
+- Tests: `node tests/demo/engine_test.mjs` (rules of the sample engine) and `tests/demo/browser_test.mjs` (real Chrome: both languages, a question, a meeting, the stop, and that no request leaves the page).
+- The same folder can be hosted as a static site. That is not enabled yet; if it is, this section will give the address.
 ---
 
 ## 5. Safety design
@@ -134,7 +137,8 @@ ghost-foreman/
 ├── ui/m/                         # the iPhone page (manifest, service worker, bundled React)
 ├── scripts/                      # phone-link.ps1, QR window, icons
 ├── tests/                        # unit tests; tests/ui = screen and phone end-to-end tests
-├── dev_server.py, ui/index.html  # simulated standalone demo (older screen)
+├── demo/, dev_server.py          # public demo on sample data (same screen as the app)
+├── ui/index.html                 # older single-file screen (no longer served)
 └── verify_phase1_and_2.py        # acceptance suite
 ```
 

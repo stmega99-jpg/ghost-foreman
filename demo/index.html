@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Ghost Foreman — demo with sample data</title>
+  <link rel="icon" href="data:," />
+  <!-- Nothing on this page can open a connection: connect-src 'none' blocks fetch/XHR/WebSocket/EventSource, and
+       default-src 'self' keeps every script, image and style on this same site. The sample data lives in
+       demo/engine.mjs. It is not connected to any AI service, API key or personal computer. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'" />
+  <style>
+    html, body { margin: 0; background: #0d0b18; color: #f3e8ff; font-family: system-ui, sans-serif; }
+    #banner { background: #3b2a66; border-bottom: 1px solid #a78bfa; padding: 8px 12px; font-size: 13px; line-height: 1.5; text-align: center; }
+    #banner a { color: #d8b4fe; }
+  </style>
+  <script type="importmap">
+    {"imports": {
+      "react": "../ui/m/vendor/react.mjs",
+      "react-dom/client": "../ui/m/vendor/react.mjs",
+      "@kirocrew/app-sdk": "./sdk.mjs"
+    }}
+  </script>
+</head>
+<body>
+  <div id="banner"></div>
+  <div id="root"><div style="margin:16px">👻 Ghost Foreman …</div></div>
+  <script type="module">
+    const lang = () => {
+      try { const s = localStorage.getItem("gf-lang"); if (s === "ja" || s === "en") return s; } catch (e) { /* storage blocked */ }
+      return String(navigator.language || "ja").toLowerCase().startsWith("ja") ? "ja" : "en";
+    };
+    const banner = document.getElementById("banner");
+    const paint = () => {
+      document.documentElement.lang = lang();
+      banner.textContent = lang() === "en"
+        ? "Demo with sample data. No real AI, account or PC is connected, and nothing you type leaves this page."
+        : "見本データのデモです。実際のAI・アカウント・PCには接続しておらず、入力した内容もこのページの外には送られません。";
+    };
+    paint();
+    window.addEventListener("gf-lang", paint);
+    const React = (await import("react")).default;
+    const { createRoot } = await import("react-dom/client");
+    const App = (await import("../ui/dist/index.mjs")).default;
+    createRoot(document.getElementById("root")).render(React.createElement(App));
+  </script>
+</body>
+</html>
