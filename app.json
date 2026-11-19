@@ -65,6 +65,8 @@
   },
   "permissions": {
     "api": [
+      "/api/apps/ghost-foreman",
+      "/api/apps/ghost-foreman/*",
       "/api/slots",
       "/api/chat/slots",
       "/api/approvals",
