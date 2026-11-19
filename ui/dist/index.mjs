@@ -162,10 +162,16 @@ function Meetings({ d, call }) {
       setLimits({ min: r.min_participants || 2, max: r.max_participants || 5 });
     }).catch(() => {});
   }, []);
+  const [geminiOk, setGeminiOk] = useState(false); // the human's answer for THIS meeting; reset after each start
   const rows = harnesses.harnesses || [];
+  const whereLabel = { external_cli: "（Kiro Crew 外で実行）", gemini_api: "（Kiro Crew 外・Gemini API 無料枠）" };
   const agentOptions = (rows.length ? rows : [{ id: "kiro", label: "Kiro", runtime: "kiro_crew", available: true }]).map((x) =>
-    h("option", { key: x.id, value: x.id, disabled: !x.available }, x.label + (x.runtime === "external_cli" ? "（Kiro Crew 外で実行）" : "") + (x.available ? "" : "　— 使えません: " + (x.reason || ""))));
-  const outside = [...parts.map((p) => p.harness), organiser].some((id) => (rows.find((x) => x.id === id) || {}).runtime === "external_cli");
+    h("option", { key: x.id, value: x.id, disabled: !x.available }, x.label + (whereLabel[x.runtime] || "") + (x.available ? "" : "　— 使えません: " + (x.reason || ""))));
+  const chosenIds = [...parts.map((p) => p.harness), organiser];
+  const runtimeOf = (id) => (rows.find((x) => x.id === id) || {}).runtime;
+  const outside = chosenIds.some((id) => runtimeOf(id) === "external_cli");
+  const usesGemini = chosenIds.includes("gemini");
+  const geminiRow = rows.find((x) => x.id === "gemini") || {};
   const blocked = [...parts.map((p) => p.harness), organiser].filter((id) => rows.length && !(rows.find((x) => x.id === id) || {}).available);
   const setPart = (i, key, value) => setParts(parts.map((p, j) => (j === i ? { ...p, [key]: value } : p)));
   const validParts = parts.filter((p) => p.perspective.trim());
@@ -180,7 +186,7 @@ function Meetings({ d, call }) {
       h("div", { style: S.row },
         h("select", { style: { ...S.input, flex: "0 0 auto" }, value: project, onChange: (e) => setProject(e.target.value) }, ...d.projects.map((p) => h("option", { key: p.id, value: p.id }, p.name))),
         h("input", { style: S.input, value: topic, onChange: (e) => setTopic(e.target.value), placeholder: "議題（例: セーブ時の安心感を与える演出）" }),
-        h("button", { style: S.btnOk, disabled: !topic.trim() || validParts.length < limits.min || blocked.length > 0, onClick: () => call("POST", "/meetings", { project_id: project, topic: topic.trim(), participants: validParts.map((p) => ({ perspective: p.perspective.trim(), harness: p.harness })), synthesizer_harness: organiser }).then(() => setTopic("")) }, "開催")
+        h("button", { style: S.btnOk, disabled: !topic.trim() || validParts.length < limits.min || blocked.length > 0 || (usesGemini && !geminiOk), onClick: () => call("POST", "/meetings", { project_id: project, topic: topic.trim(), participants: validParts.map((p) => ({ perspective: p.perspective.trim(), harness: p.harness })), synthesizer_harness: organiser, allow_unpublished_to_gemini: usesGemini && geminiOk === true }).then(() => { setTopic(""); setGeminiOk(false); }) }, "開催")
       ),
       h("div", { style: { marginTop: 10 } },
         h("div", { style: S.mute }, `参加者（${limits.min}〜${limits.max}人）: それぞれの視点と、どのAIで参加するか`),
@@ -199,7 +205,15 @@ function Meetings({ d, call }) {
           h("button", { style: S.btn, onClick: () => loadHarnesses(true) }, "↻ 再確認")),
         ...rows.filter((x) => !x.available && x.reason).map((x) => h("div", { key: "r" + x.id, style: { color: C.warn, fontSize: 12 } }, `${x.label}: ${x.reason}`)),
         outside ? h("div", { style: { ...S.log, borderColor: C.warn } },
-          "⚠️ Claude Code / Codex は Kiro Crew の外で、Ghost Foreman が直接起動します（ブレストに限った例外）。道具（ツール）は使えず文章のやり取りだけです。緊急停止・実行記録・メモリ管理は Ghost Foreman が行います。各サービスの利用枠を使います。") : null),
+          "⚠️ Claude Code / Codex は Kiro Crew の外で、Ghost Foreman が直接起動します（ブレストに限った例外）。道具（ツール）は使えず文章のやり取りだけです。緊急停止・実行記録・メモリ管理は Ghost Foreman が行います。各サービスの利用枠を使います。") : null,
+        usesGemini ? h("div", { style: { ...S.log, borderColor: C.warn } },
+          h("div", null, "⚠️ Gemini は Kiro Crew の外で、Gemini API の無料枠を Ghost Foreman が呼び出します。文章のやり取りだけで、使えないときに別のAIが代わりに答えることも、有料APIに切り替わることもありません。"),
+          h("label", { style: { display: "flex", gap: 8, alignItems: "flex-start", marginTop: 6 } },
+            h("input", { type: "checkbox", checked: geminiOk, onChange: (e) => setGeminiOk(e.target.checked), "aria-label": "この会議の内容を Gemini 無料枠に送ることを許可する" }),
+            h("span", null, h("strong", null, "この会議の内容を Gemini 無料枠に送ることを許可する"), "（この会議だけ）"),
+          ),
+          h("div", { style: S.mute }, geminiRow.consent_note || "議題・各AIの案など、未公開の制作情報を含みます。無料枠に送った内容は、Google がサービス改善に使う場合があります。"),
+          geminiOk ? null : h("div", { style: { color: C.warn, fontSize: 12 } }, "許可しない場合は、Gemini を別のAIに替えてください。")) : null),
       h("div", { style: S.mute }, "相談段階では何も実装しません。あなたが案を採用したときだけ、担当スロットへ発注します。")
     ),
     ...d.meetings.map((m) => {
@@ -213,8 +227,10 @@ function Meetings({ d, call }) {
         h("div", { style: S.mute }, "参加: " + m.participants.join(" / ")),
         (m.summary && m.summary.participants_detail) ? h("div", { style: { ...S.row, marginTop: 4 } },
           ...[...m.summary.participants_detail, ...(m.summary.synthesizer ? [{ ...m.summary.synthesizer, speaker: "整理役（" }] : [])].map((p, i) =>
-            h(Badge, { key: i, text: `${p.speaker ? p.speaker.split("（")[0] : ""}: ${p.label || p.harness}・${p.runtime_label || ""}${p.model ? "・" + p.model : ""}${p.ran_on ? (p.verified ? "" : "（未確認）") : "（未実行）"}`, color: p.verified ? (p.runtime === "external_cli" ? C.warn : C.ok) : C.mute }))) : null,
-        (m.summary && m.summary.outside_kiro_crew) ? h("div", { style: { color: C.warn, fontSize: 12, marginTop: 4 } }, "この会議には、Kiro Crew の外で Ghost Foreman が直接起動したAI（ツールなし・文章のみ）が含まれます。") : null,
+            h(Badge, { key: i, text: `${p.speaker ? p.speaker.split("（")[0] : ""}: ${p.label || p.harness}・${p.runtime_label || ""}${p.model ? "・" + p.model : ""}${p.ran_on ? (p.verified ? "" : "（未確認）") : "（未実行）"}`, color: p.verified ? (p.runtime !== "kiro_crew" ? C.warn : C.ok) : C.mute }))) : null,
+        (m.summary && m.summary.outside_kiro_crew) ? h("div", { style: { color: C.warn, fontSize: 12, marginTop: 4 } }, "この会議には、Kiro Crew の外で動いたAI（Ghost Foreman が直接起動した CLI、または Gemini API。ツールなし・文章のみ）が含まれます。") : null,
+        (m.summary && m.summary.gemini_consent && m.summary.gemini_consent.asked) ? h("div", { style: { color: C.warn, fontSize: 12, marginTop: 2 } },
+          m.summary.gemini_consent.allowed ? `Gemini 無料枠への送信: この会議だけ許可（${m.summary.gemini_consent.decided_at}）` : "Gemini 無料枠への送信: 許可なし") : null,
         ...m.rounds.map((r, i) => h("div", { key: i, style: S.log }, h("strong", null, r.phase), ...r.entries.map((e, j) => h("div", { key: j, style: { marginTop: 6 } }, h("strong", null, e.speaker + ": "), e.proposal || e.critique)))),
         m.summary && m.summary.consensus
           ? h("div", { style: { ...S.log, borderColor: C.accent } },

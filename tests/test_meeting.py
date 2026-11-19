@@ -180,7 +180,7 @@ class Meeting(unittest.TestCase):
     def test_participant_validation(self):
         self.assertEqual(MeetingEngine.normalize_participants(["a", "b"]), [{"perspective": "a", "harness": "kiro"}, {"perspective": "b", "harness": "kiro"}])
         self.assertEqual(MeetingEngine.normalize_participants([{"perspective": "a", "harness": "kas"}, "b"])[0]["harness"], "kiro")
-        for bad in (["only one"], [str(i) for i in range(6)], [{"perspective": "a", "harness": "gemini"}, "b"], [{"perspective": "a", "harness": "../x"}, "b"]):
+        for bad in (["only one"], [str(i) for i in range(6)], [{"perspective": "a", "harness": "grok"}, "b"], [{"perspective": "a", "harness": "../x"}, "b"]):
             with self.assertRaises(ValueError):
                 MeetingEngine.normalize_participants(bad)
 

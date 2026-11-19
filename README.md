@@ -102,7 +102,9 @@ Tests for the failure paths (quota exhaustion, overloaded model, rejected key, S
 
 ## AI meeting participants (Kiro, Claude Code, Codex)
 
-Each meeting participant can be **Kiro**, **Claude Code** or **Codex**, chosen per participant in the meeting form.
+Each meeting participant can be **Kiro**, **Claude Code**, **Codex** or **Gemini**, chosen per participant in the meeting form.
+
+- **Gemini** is the official Gemini API free tier, called by Ghost Foreman (labelled 「Kiro Crew 外で実行（Gemini API 無料枠）」). The API returns text only. A meeting's content is unpublished project text, so **Gemini takes part only if you allow it for that meeting**: the form shows a checkbox when Gemini is chosen, and the server refuses a meeting with Gemini unless the request carries `allow_unpublished_to_gemini: true`. Nothing is created or sent when it is refused. The permission is kept in the minutes (`gemini_consent`), ends with the meeting, and does not change the global `allow_unpublished_to_free_tier` switch. If the free tier is exhausted or the key is rejected, Gemini has no answer: no other AI answers in its place and there is no paid API. A stop is checked right before each request, and an answer that arrives after a stop is discarded.
 
 - **Kiro** runs inside Kiro Crew, in a Ghost Foreman managed slot on the app's `meeting-participant` agent. It is labelled 「Kiro Crew で実行」. Kiro Crew starts a Kiro session only after its `kirocrew-guide` and `kirocrew-mate` servers each advertise a tool, so this agent sees one read-only tool on each (`search_docs`, `find_capabilities`) and nothing else. Ghost Foreman does not auto-approve them, so any call waits for you.
 - **Claude Code and Codex run outside Kiro Crew.** Kiro Crew 0.12.2 gives an app no way to choose the backend of its own slots, so for brainstorming only, Ghost Foreman starts the `claude` and `codex` CLIs directly (`backend/external_ai.py`). The UI and the minutes label them 「Kiro Crew 外で実行」. All other work still goes through Kiro Crew.

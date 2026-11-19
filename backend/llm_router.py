@@ -93,6 +93,61 @@ class LlmRouter:
                 (_now_iso(), provider_id, model, task, tin, tout, basis, 1 if ok else 0, note[:300]),
             )
 
+    # ------------------------------------------------------------ Gemini free tier
+    def gemini_status(self) -> Dict[str, Any]:
+        """Can Gemini take a call right now? Read from local state only: checking costs no API call (and no quota)."""
+        if not self.gemini.has_key():
+            return {"available": False, "reason": "GEMINI_API_KEY が Kiro Crew に登録されていません（設定 → Secrets）"}
+        until = self._cooldown_until()
+        if self._clock() < until:
+            return {"available": False, "reason": f"Gemini 無料枠が上限に達したため待機中です（再開目安 {max(1, int((until - self._clock()) // 60))} 分後）。有料APIには切り替えません"}
+        if self._soft_limit_reached(GEMINI_ID):
+            return {"available": False, "reason": "Gemini 無料枠の、設定した1日の上限に達しています"}
+        return {"available": True, "reason": ""}
+
+    def _try_gemini(self, task: str, prompt: str, system: str, json_mode: bool, max_output_tokens: int, notes: List[str]) -> Optional[LlmResult]:
+        """One Gemini free-tier attempt. Returns the result, or None with the reason appended to *notes*."""
+        st = self.gemini_status()
+        if not st["available"]:
+            notes.append("Gemini: " + st["reason"])
+            return None
+        try:
+            res = self.gemini.generate(prompt, system=system, json_mode=json_mode, max_output_tokens=max_output_tokens)
+            self._bump_quota(GEMINI_ID)
+            self._set_status(GEMINI_ID, "available")
+            self._record(GEMINI_ID, res.model, task, res.input_tokens, res.output_tokens, True, "ok", "free tier (token counts measured)")
+            return LlmResult(res.text, GEMINI_ID, res.model, res.input_tokens, res.output_tokens, None, "Gemini公式無料枠を使用（請求額は未確認）")
+        except GeminiQuotaExhausted as exc:
+            wait = min(max(exc.retry_after_secs or DEFAULT_COOLDOWN_SECS, 60.0), MAX_COOLDOWN_SECS)
+            self.store.set_state("gemini_cooldown_until", self._clock() + wait)
+            self._set_status(GEMINI_ID, "quota_exhausted_switched")
+            self._record(GEMINI_ID, "", task, 0, 0, False, f"quota exhausted; cooldown {int(wait)}s", "free tier")
+            notes.append(f"Gemini無料枠が上限（再開目安 {int(wait // 60)} 分後）。有料APIには切り替えません")
+        except (GeminiAuthError, GeminiNoKey) as exc:
+            self._set_status(GEMINI_ID, "key_rejected")
+            self._record(GEMINI_ID, "", task, 0, 0, False, str(exc), "free tier")
+            notes.append(f"Gemini: {exc}")
+        except GeminiUnavailable as exc:
+            self._record(GEMINI_ID, "", task, 0, 0, False, str(exc), "free tier")
+            notes.append(f"Gemini一時利用不可: {exc}")
+        return None
+
+    def gemini_only(self, task: str, prompt: str, *, unpublished_allowed: bool, system: str = "", json_mode: bool = False,
+                    max_output_tokens: int = 1024) -> LlmResult:
+        """Gemini free tier and NOTHING else: no Kiro fallback, no paid API. For a meeting participant named "Gemini".
+
+        *unpublished_allowed* is the caller's own, explicit permission for THIS text (an AI meeting asks the human per
+        meeting). It is required, and the global ``allow_unpublished_to_free_tier`` switch is neither read nor changed.
+        Raises ``LlmUnavailable`` with the reason when Gemini cannot answer.
+        """
+        if unpublished_allowed is not True:
+            raise LlmUnavailable("未公開の制作情報を Gemini 無料枠に送る許可がありません")
+        notes: List[str] = []
+        res = self._try_gemini(task, prompt, system, json_mode, max_output_tokens, notes)
+        if res is None:
+            raise LlmUnavailable("; ".join(notes) or "Gemini が回答できませんでした")
+        return res
+
     # ------------------------------------------------------------ main entry
     def complete(self, task: str, prompt: str, system: str = "", json_mode: bool = False, confidential: bool = True, scope: str = "global") -> LlmResult:
         notes: List[str] = []
@@ -102,35 +157,11 @@ class LlmRouter:
             notes.append("Gemini: キー未登録")
         elif confidential and not self.allow_confidential_to_free_tier():
             notes.append("Gemini無料枠: 制作内容を含むため未許可のためスキップ（設定 allow_unpublished_to_free_tier）")
-        elif self._clock() < self._cooldown_until():
-            notes.append("Gemini無料枠: 上限到達による待機中")
-            switched_from = GEMINI_ID
-        elif self._soft_limit_reached(GEMINI_ID):
-            notes.append("Gemini無料枠: 設定した日次上限に到達")
-            switched_from = GEMINI_ID
         else:
-            try:
-                res = self.gemini.generate(prompt, system=system, json_mode=json_mode)
-                self._bump_quota(GEMINI_ID)
-                self._set_status(GEMINI_ID, "available")
-                self._record(GEMINI_ID, res.model, task, res.input_tokens, res.output_tokens, True, "ok", "free tier (token counts measured)")
-                return LlmResult(res.text, GEMINI_ID, res.model, res.input_tokens, res.output_tokens, None, "Gemini公式無料枠を使用（請求額は未確認）")
-            except GeminiQuotaExhausted as exc:
-                wait = min(max(exc.retry_after_secs or DEFAULT_COOLDOWN_SECS, 60.0), MAX_COOLDOWN_SECS)
-                self.store.set_state("gemini_cooldown_until", self._clock() + wait)
-                self._set_status(GEMINI_ID, "quota_exhausted_switched")
-                self._record(GEMINI_ID, "", task, 0, 0, False, f"quota exhausted; cooldown {int(wait)}s", "free tier")
-                notes.append(f"Gemini無料枠が上限（再開目安 {int(wait // 60)} 分後）。有料APIには切り替えません")
-                switched_from = GEMINI_ID
-            except (GeminiAuthError, GeminiNoKey) as exc:
-                self._set_status(GEMINI_ID, "key_rejected")
-                self._record(GEMINI_ID, "", task, 0, 0, False, str(exc), "free tier")
-                notes.append(f"Gemini: {exc}")
-                switched_from = GEMINI_ID
-            except GeminiUnavailable as exc:
-                self._record(GEMINI_ID, "", task, 0, 0, False, str(exc), "free tier")
-                notes.append(f"Gemini一時利用不可: {exc}")
-                switched_from = GEMINI_ID
+            res = self._try_gemini(task, prompt, system, json_mode, 1024, notes)
+            if res is not None:
+                return res
+            switched_from = GEMINI_ID
 
         # Fallback: a real Kiro Crew session (included in the user's plan; token cost not exposed -> "unknown")
         if getattr(self.adapter, "live", None) is not None:

@@ -111,4 +111,57 @@ globalThis.__api.get = async () => JSON.parse(JSON.stringify(noHalt));
 await act(async () => { root.render(React.createElement(App, { key: "nohalt" })); });
 await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
 expect("no banner when nothing is stopped", !text().includes("🛑 緊急停止中"));
+
+// AI meeting with Gemini: the permission to send this meeting's content is asked per meeting
+const listing = { min_participants: 2, max_participants: 5, harnesses: [
+  { id: "kiro", label: "Kiro", runtime: "kiro_crew", available: true, reason: "" },
+  { id: "claude", label: "Claude Code", runtime: "external_cli", available: true, reason: "" },
+  { id: "codex", label: "Codex", runtime: "external_cli", available: true, reason: "" },
+  { id: "gemini", label: "Gemini", runtime: "gemini_api", available: true, reason: "", needs_consent: true, consent_note: "未公開の制作情報を含みます" },
+] };
+globalThis.__api.get = async (p) => { calls.push(["GET", p]); return JSON.parse(JSON.stringify(String(p).includes("/meetings/harnesses") ? listing : noHalt)); };
+await act(async () => { root.render(React.createElement(App, { key: "gemini" })); });
+await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+await clickText("AI会議");
+await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+const setValue = async (el, value, proto, ev) => {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
+    el.dispatchEvent(new dom.window.Event(ev, { bubbles: true }));
+  });
+};
+const consentBox = () => document.querySelector("input[type=checkbox][aria-label='この会議の内容を Gemini 無料枠に送ることを許可する']");
+const holdButton = () => [...document.querySelectorAll("button")].find((b) => b.textContent === "開催");
+expect("Gemini is offered with where it runs", [...document.querySelectorAll("option")].some((o) => o.value === "gemini" && o.textContent.includes("Gemini API 無料枠")));
+expect("no Gemini permission box while Gemini is not chosen", !consentBox());
+await setValue(document.querySelector("input[placeholder^='議題']"), "Gemini込みの議題", dom.window.HTMLInputElement.prototype, "input");
+await setValue(document.querySelector("select[aria-label='参加者BのAI']"), "gemini", dom.window.HTMLSelectElement.prototype, "change");
+expect("choosing Gemini shows the per-meeting permission box, unchecked", !!consentBox() && consentBox().checked === false && text().includes("この会議だけ"));
+expect("...and the meeting cannot be started until it is checked", holdButton().disabled === true);
+await act(async () => { consentBox().dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+expect("checking it enables 開催", consentBox().checked === true && holdButton().disabled === false);
+calls.length = 0;
+await clickText("開催");
+await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+const startCall = calls.find((c) => c[0] === "POST" && c[1].endsWith("/meetings"));
+expect("POST /meetings carries allow_unpublished_to_gemini=true and the Gemini participant",
+  !!startCall && startCall[2].allow_unpublished_to_gemini === true && startCall[2].participants.some((p) => p.harness === "gemini"));
+expect("the permission is reset for the next meeting", consentBox() && consentBox().checked === false);
+await setValue(document.querySelector("select[aria-label='参加者BのAI']"), "kiro", dom.window.HTMLSelectElement.prototype, "change");
+await setValue(document.querySelector("input[placeholder^='議題']"), "Kiroだけの議題", dom.window.HTMLInputElement.prototype, "input");
+calls.length = 0;
+await clickText("開催");
+await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+const kiroOnly = calls.find((c) => c[0] === "POST" && c[1].endsWith("/meetings"));
+expect("a meeting without Gemini sends no permission", !!kiroOnly && kiroOnly[2].allow_unpublished_to_gemini === false && !consentBox());
+// the minutes show what was decided for that meeting
+const withMinutes = JSON.parse(JSON.stringify(noHalt));
+withMinutes.meetings = [{ id: "mtg-g", topic: "t", status: "awaiting_human_adoption", participants: ["参加者A（x／Gemini）"], rounds: [], created_at: "",
+  summary: { participants_detail: [{ speaker: "参加者A（x／Gemini）", label: "Gemini", harness: "gemini", runtime: "gemini_api", runtime_label: "Kiro Crew 外で実行（Gemini API 無料枠）", ran_on: "gemini", model: "gemini-2.5-flash-lite", verified: true }],
+    outside_kiro_crew: true, gemini_consent: { asked: true, allowed: true, scope: "この会議のみ", decided_at: "2026-11-19T20:30:00+0900" }, options_for_human: [] } }];
+globalThis.__api.get = async (p) => JSON.parse(JSON.stringify(String(p).includes("/meetings/harnesses") ? listing : withMinutes));
+await act(async () => { root.render(React.createElement(App, { key: "minutes" })); });
+await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+await clickText("AI会議");
+expect("the minutes say Gemini was allowed for this meeting only", text().includes("Gemini 無料枠への送信: この会議だけ許可") && text().includes("gemini-2.5-flash-lite"));
 process.exit(process.exitCode || 0);
