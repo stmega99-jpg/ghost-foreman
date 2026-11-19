@@ -107,6 +107,7 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             "desktop_lease": lease_row,
             "usage": supervisor.llm.usage_summary(),
             "halt": adapter.halt.snapshot(),
+            "external_runs": supervisor.external.recent(20),
             "notifications": supervisor.notifier.recent(20),
         }
 
@@ -147,6 +148,7 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             project_id=payload.get("project_id", "proj-game"),
             topic=payload["topic"],
             participants=payload.get("participants"),
+            synthesizer_harness=payload.get("synthesizer_harness", ""),
         )
         return 200, mtg
 
@@ -211,6 +213,16 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
             code = "unsafe_url" if isinstance(exc, UnsafeUrl) else "news_failed"
             return 422, {"error": f"{type(exc).__name__}: {exc}", "code": code}
         return 200, item
+
+    if method == "GET" and rel_path == "/meetings/harnesses":
+        # AIs (Kiro Crew harnesses) a meeting participant can run on: Claude Code / Codex / Kiro ...
+        listing = supervisor.meetings.available_harnesses(refresh=str(payload.get("refresh", "")) == "1")
+        listing.update({"max_participants": 5, "min_participants": 2})
+        return 200, listing
+
+    if method == "GET" and rel_path == "/meetings/external-runs":
+        # Record of every Claude Code / Codex run started outside Kiro Crew for meetings.
+        return 200, {"runs": supervisor.external.recent(int(payload.get("limit", 30)))}
 
     if method == "GET" and rel_path == "/m/ping":
         # Cheap "am I signed in?" check for the phone page (the Gateway answers 401/403 before this if not).
@@ -297,6 +309,8 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
         ("GET", "/slots/history"),
         ("GET", "/usage"),
         ("POST", "/news/summarize"),
+        ("GET", "/meetings/harnesses"),
+        ("GET", "/meetings/external-runs"),
         ("GET", "/m/ping"),
         ("POST", "/notify/test"),
         ("POST", "/stop"),

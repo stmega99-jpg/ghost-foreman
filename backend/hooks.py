@@ -77,6 +77,7 @@ async def on_shutdown(ctx: Any = None) -> None:
     global _LIVE
     if _SUPERVISOR is not None:
         _SUPERVISOR.notifier.stop()
+        _SUPERVISOR.external.kill_all()
     if _LIVE is not None:
         await _LIVE.release_all()
         _LIVE = None

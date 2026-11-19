@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .crew_adapter import CrewAdapter
 from .llm_router import LlmRouter, LlmUnavailable
+from .external_ai import ExternalAIRunner
 from .meeting import MeetingEngine, extract_json
 from .news import NewsCollector
 from .notifier import Notifier
@@ -20,7 +22,12 @@ class ForemanSupervisor:
     def __init__(self, store: ForemanStore, adapter: CrewAdapter) -> None:
         self.store = store
         self.adapter = adapter
-        self.meetings = MeetingEngine(store, adapter)
+        rooms = Path(store.db_path).resolve().parent / "meeting-rooms"
+        self.external = ExternalAIRunner(store, rooms_dir=rooms, is_halted=lambda pid: adapter.halt.is_halted(project_id=pid))
+        adapter.stop_callbacks.append(
+            lambda scope, target: self.external.kill_all(None if scope == "all" else target) if scope in ("all", "project") else []
+        )
+        self.meetings = MeetingEngine(store, adapter, external=self.external)
         self.llm = LlmRouter(store, adapter)
         self.news = NewsCollector(store, self.llm)
         self.notifier = Notifier(store, adapter)
@@ -848,14 +855,18 @@ class ForemanSupervisor:
         self,
         project_id: str,
         topic: str,
-        participants: Optional[List[str]] = None,
+        participants: Optional[List[Any]] = None,
+        synthesizer_harness: str = "",
     ) -> Dict[str, Any]:
         """Run a structured AI Meeting: Step 1 Independent Ideation -> Step 2 Mutual Critique -> Step 3 Ghost Synthesis."""
         if self.adapter.live is not None:
             # Real meeting: participants are live agent slots; `participants` (optional) are their perspectives.
-            return self.meetings.start(project_id, topic, participants)
+            return self.meetings.start(project_id, topic, participants, synthesizer_harness)
         # --- SIMULATED fallback (no Gateway bound): canned text, labelled as such ---
-        chosen = participants or ["Claude-Code #1 (設計視点)", "Codex #1 (実装・負荷視点)", "Gemini-Worker #1 (プレイヤー体験視点)"]
+        chosen = [
+            str(p.get("perspective", "")) if isinstance(p, dict) else str(p)
+            for p in (participants or ["Claude-Code #1 (設計視点)", "Codex #1 (実装・負荷視点)", "Gemini-Worker #1 (プレイヤー体験視点)"])
+        ]
         self.route_supervisor_llm("brainstorm")
         now = _now_iso()
         meeting_id = f"mtg-{uuid.uuid4().hex[:8]}"
