@@ -81,7 +81,8 @@
 
 1. THE DEMO SHALL run the same screen on built-in sample data, labelled as a sample.
 2. THE DEMO SHALL NOT be able to open any connection (Content-Security-Policy `connect-src 'none'`) and SHALL NOT contain a path to an AI contract, an API key, or the owner's PC.
-3. THE DEMO SHALL keep the app's rules: a stop is lifted only by a person; Gemini needs the per-meeting permission; a one-time answer is not kept.
+3. A hosted copy SHALL contain only the files the demo page needs (the page, its engine, the screen code and React), and no backend, data, tests or documents.
+4. THE DEMO SHALL keep the app's rules: a stop is lifted only by a person; Gemini needs the per-meeting permission; a one-time answer is not kept.
 
 ## Out of scope (stated, not hidden)
 
