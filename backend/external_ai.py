@@ -235,11 +235,15 @@ class ExternalAIRunner:
     # ------------------------------------------------------------------ stop
     def kill_all(self, project_id: Optional[str] = None) -> List[str]:
         """Emergency stop: kill every running CLI (or one project's). Returns the run ids."""
+        # Marked under the lock, so a run that is still being started (``proc`` not set yet) sees the mark when it
+        # registers its process and kills it itself. See ``run`` for the other half.
         with self._lock:
             targets = [(rid, info) for rid, info in self._procs.items() if project_id is None or info["project_id"] == project_id]
-        for rid, info in targets:
-            info["killed"] = "緊急停止"
-            self._kill(info["proc"])
+            for _, info in targets:
+                info["killed"] = "緊急停止"
+            procs = [info["proc"] for _, info in targets if info["proc"] is not None]
+        for proc in procs:
+            self._kill(proc)
         return [rid for rid, _ in targets]
 
     def running(self) -> int:
@@ -252,15 +256,20 @@ class ExternalAIRunner:
         room.mkdir(parents=True, exist_ok=True)
         return room
 
-    def _wait_for_capacity(self, project_id: str, deadline: float) -> Optional[float]:
+    def _wait_for_capacity(self, run_id: str, project_id: str, deadline: float) -> Optional[float]:
+        """Wait for room, then RESERVE it: the run is tracked (``proc`` None) before its process exists.
+
+        Counting and reserving under one lock keeps parallel starts within ``MAX_CONCURRENT``, and the reservation
+        is what lets ``kill_all`` reach a run whose process is still being created.
+        """
         while True:
             if self.is_halted(project_id):
                 raise ExternalRunRefused("緊急停止中のため起動しません")
             free = self._memory()
             with self._lock:
-                busy = len(self._procs)
-            if busy < MAX_CONCURRENT and (free is None or free >= MIN_FREE_GB):
-                return free
+                if len(self._procs) < MAX_CONCURRENT and (free is None or free >= MIN_FREE_GB):
+                    self._procs[run_id] = {"proc": None, "project_id": project_id, "killed": ""}
+                    return free
             if time.monotonic() > deadline:
                 raise ExternalRunRefused(
                     f"メモリが足りないため起動できませんでした（空き {free:.1f}GB／必要 {MIN_FREE_GB}GB）" if free is not None and free < MIN_FREE_GB
@@ -294,27 +303,48 @@ class ExternalAIRunner:
             row["cli_version"], row["auth"] = st.get("version", ""), st.get("auth", "")
             if not st["available"]:
                 raise ExternalRunRefused(st["reason"] or f"{LABELS.get(harness, harness)} は使えません")
-            row["free_gb_at_start"] = self._wait_for_capacity(project_id, time.monotonic() + MEMORY_WAIT_SECS)
-            room = self._room(run_id)
-            cmd = self._command(harness, self._resolve(harness) or [], room)
-            row["command"] = Path(cmd[0]).name + (" " + Path(cmd[1]).name if len(cmd) > 1 and cmd[1].endswith(".js") else "")
-            kwargs: Dict[str, Any] = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "cwd": str(room), "env": child_env()}
-            if sys.platform == "win32":
-                kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            else:
-                kwargs["start_new_session"] = True
-            proc = self._popen(cmd, **kwargs)
-            info = {"proc": proc, "project_id": project_id, "killed": ""}
-            with self._lock:
-                self._procs[run_id] = info
-            row["pid"], row["status"] = getattr(proc, "pid", 0), "running"
-            self._write(row)
-            try:
-                self._feed_and_watch(harness, proc, prompt, result, timeout, info)
+            row["free_gb_at_start"] = self._wait_for_capacity(run_id, project_id, time.monotonic() + MEMORY_WAIT_SECS)
+            room: Optional[Path] = None
+            try:  # from here the run is reserved in self._procs; every exit below releases it
+                info = self._procs[run_id]
+                room = self._room(run_id)
+                cmd = self._command(harness, self._resolve(harness) or [], room)
+                row["command"] = Path(cmd[0]).name + (" " + Path(cmd[1]).name if len(cmd) > 1 and cmd[1].endswith(".js") else "")
+                kwargs: Dict[str, Any] = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "cwd": str(room), "env": child_env()}
+                if sys.platform == "win32":
+                    kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                else:
+                    kwargs["start_new_session"] = True
+                # Last check before creating the process: a stop that has landed since the capacity check starts nothing.
+                with self._lock:
+                    stopped = bool(info["killed"])
+                if stopped or self.is_halted(project_id):
+                    raise ExternalRunRefused("緊急停止中のため起動しません")
+                proc = self._popen(cmd, **kwargs)
+                # A stop can land while the process is being created. kill_all marks the reservation under this lock
+                # and the stop sets its hold before calling kill_all, so after this block either kill_all sees the
+                # process, or this run sees the mark or the hold and kills the process itself. Nothing in between.
+                with self._lock:
+                    info["proc"] = proc
+                    stop_now = bool(info["killed"])
+                if not stop_now and self.is_halted(project_id):
+                    stop_now = True
+                if stop_now:
+                    info["killed"] = info["killed"] or "緊急停止"
+                    self._kill(proc)
+                    try:
+                        proc.wait(timeout=30)
+                    except Exception:  # noqa: BLE001 - kill_tree already forced it; this only reaps
+                        pass
+                row["pid"], row["status"] = getattr(proc, "pid", 0), "running"
+                self._write(row)
+                if not stop_now:
+                    self._feed_and_watch(harness, proc, prompt, result, timeout, info)
             finally:
                 with self._lock:
                     self._procs.pop(run_id, None)
-                shutil.rmtree(room, ignore_errors=True)
+                if room is not None:
+                    shutil.rmtree(room, ignore_errors=True)
             if info["killed"]:
                 result["reply"] = None
                 result["error"] = result["error"] or f"{info['killed']}により終了しました"

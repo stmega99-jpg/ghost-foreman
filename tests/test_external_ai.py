@@ -177,7 +177,7 @@ class StopMemoryRecord(unittest.TestCase):
     def test_kill_all_stops_a_running_cli(self):
         h = Harness({"claude": [CLAUDE_INIT]}, hang=True)
         out = {}
-        t = threading.Thread(target=lambda: out.update(h.runner.run("claude", "x", project_id="p")))
+        t = threading.Thread(target=lambda: out.update(h.runner.run("claude", "x", project_id="p")), daemon=True)
         t.start()
         for _ in range(300):
             if h.runner.running():
@@ -219,6 +219,123 @@ class StopMemoryRecord(unittest.TestCase):
             u = dict(c.execute("SELECT * FROM llm_usage WHERE provider_id='claude-cli'").fetchone())
         self.assertIsNone(u["cost_usd"], "billing is unconfirmed, never shown as 0")
         self.assertIn("Kiro Crew外", u["cost_basis"])
+
+
+class StopRacesWithStart(unittest.TestCase):
+    """An emergency stop that lands while a CLI is being started must still stop it.
+
+    The stop sets the hold first and then calls ``kill_all`` (crew_adapter.stop_control). The dangerous window is
+    between the start's last hold check and the moment the new process is tracked: ``kill_all`` cannot see it yet.
+    """
+
+    def _stop_during_popen(self, set_hold: bool, call_kill_all: bool):
+        h = Harness({"claude": [CLAUDE_INIT] + CLAUDE_OK[1:]}, hang=True)
+        real_popen = h.popen
+
+        def popen(cmd, **kw):
+            # The stop arrives while the OS is creating the process.
+            if set_hold:
+                h.halted = True
+            if call_kill_all:
+                h.runner.kill_all("p")
+            return real_popen(cmd, **kw)
+
+        h.runner._popen = popen
+        out = {}
+        t = threading.Thread(target=lambda: out.update(h.runner.run("claude", "x", project_id="p")), daemon=True)
+        t.start()
+        t.join(5)
+        self.assertFalse(t.is_alive(), "the run must end instead of running on after the stop")
+        return h, out
+
+    def test_stop_during_process_creation_kills_the_new_process(self):
+        h, out = self._stop_during_popen(set_hold=True, call_kill_all=True)
+        self.assertEqual(len(h.killed), 1, "the process started during the stop is killed")
+        self.assertIsNone(out["reply"])
+        self.assertIn("緊急停止", out["error"])
+        self.assertEqual(h.runner.recent()[0]["status"], "failed")
+
+    def test_hold_alone_during_process_creation_kills_it(self):
+        # The hold is set but kill_all has not run yet (or already ran before the process existed).
+        h, out = self._stop_during_popen(set_hold=True, call_kill_all=False)
+        self.assertEqual(len(h.killed), 1)
+        self.assertIn("緊急停止", out["error"])
+
+    def test_kill_all_alone_during_process_creation_kills_it(self):
+        # A meeting abort calls kill_all for its project; a start already past its checks must not escape it.
+        h, out = self._stop_during_popen(set_hold=False, call_kill_all=True)
+        self.assertEqual(len(h.killed), 1)
+        self.assertIn("緊急停止", out["error"])
+
+    def test_stop_after_capacity_check_starts_nothing(self):
+        h = Harness({"claude": CLAUDE_OK})
+        real_room = h.runner._room
+
+        def room(name):
+            h.halted = True  # the stop lands after the capacity check, before the process is created
+            h.runner.kill_all("p")
+            return real_room(name)
+
+        h.runner._room = room
+        r = h.runner.run("claude", "x", project_id="p")
+        self.assertEqual(h.started, [], "no process is created once the stop is in force")
+        self.assertIn("緊急停止", r["error"])
+
+    def test_concurrent_starts_never_exceed_the_limit(self):
+        h = Harness({"claude": [CLAUDE_INIT]}, hang=True)
+        alive, peak, lock = [0], [0], threading.Lock()
+        real_popen = h.popen
+
+        def popen(cmd, **kw):
+            time.sleep(0.05)  # widen the check-then-start window
+            with lock:
+                alive[0] += 1
+                peak[0] = max(peak[0], alive[0])
+            return real_popen(cmd, **kw)
+
+        def kill(proc):
+            with lock:
+                alive[0] -= 1
+            proc.kill()
+
+        h.runner._popen, h.runner._kill = popen, kill
+        threads = [threading.Thread(target=h.runner.run, args=("claude", "x"), kwargs={"project_id": "p"}, daemon=True) for _ in range(6)]
+        with mock.patch.object(ext, "MEMORY_WAIT_SECS", 1.0):
+            for t in threads:
+                t.start()
+            time.sleep(0.6)
+            h.halted = True
+            h.runner.kill_all()
+            for t in threads:
+                t.join(10)
+        self.assertLessEqual(peak[0], ext.MAX_CONCURRENT)
+        self.assertEqual(h.runner.running(), 0)
+
+    def test_randomised_stop_timing_never_leaves_a_process_running(self):
+        import random
+
+        rng = random.Random(7)
+        for _ in range(40):
+            h = Harness({"claude": [CLAUDE_INIT]}, hang=True)
+            procs, real_popen = [], h.popen
+
+            def popen(cmd, **kw):
+                time.sleep(rng.uniform(0, 0.02))
+                p = real_popen(cmd, **kw)
+                procs.append(p)
+                return p
+
+            h.runner._popen = popen
+            out = {}
+            t = threading.Thread(target=lambda: out.update(h.runner.run("claude", "x", project_id="p")), daemon=True)
+            t.start()
+            time.sleep(rng.uniform(0, 0.03))
+            h.halted = True
+            h.runner.kill_all("p")
+            t.join(5)
+            self.assertFalse(t.is_alive())
+            self.assertTrue(all(p.killed.is_set() for p in procs), "every process that was created is killed")
+            self.assertIsNone(out.get("reply"))
 
 
 if __name__ == "__main__":
