@@ -13,8 +13,10 @@ What this module guarantees, because Kiro Crew's own guards do not apply out her
 * No metered API. Claude must report ``apiKeySource: none`` (subscription sign-in) and Codex must be signed in with
   ChatGPT; otherwise the run is refused (steering rule 5). API keys are never passed: the child gets an allowlisted
   environment only.
-* Emergency stop: every child is tracked and killed (whole process tree) by ``kill_all``; the meeting stop and the
-  global stop both call it, and a stop in force refuses new starts.
+* Emergency stop: every CLI is tracked and killed by ``kill_all``; the meeting stop and the global stop both call
+  it, and a stop in force refuses new starts. On Windows each CLI runs in its own Job Object (``winjob``), so a
+  stop ends the CLI and every process it started at once, and closing the job at the end of a run ends anything
+  it left behind.
 * Memory: a start waits until enough RAM is free and at most ``MAX_CONCURRENT`` CLIs run at once.
 * Record: every run is written to ``external_runs`` (CLI, version, model, time, outcome, token counts) and to
   ``llm_usage`` with the cost marked unconfirmed. The prompt itself is stored only as a hash.
@@ -39,6 +41,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from . import winjob
 from .store import ForemanStore, _now_iso
 
 logger = logging.getLogger("ghost-foreman.external")
@@ -134,6 +137,9 @@ def resolve_command(harness: str) -> Optional[List[str]]:
 
 
 def kill_tree(proc: subprocess.Popen) -> None:
+    # The job first, and even when the CLI itself has already exited: a child it started may still be running.
+    if winjob.terminate(proc):
+        return
     if proc.poll() is not None:
         return
     try:
@@ -152,7 +158,7 @@ def kill_tree(proc: subprocess.Popen) -> None:
 class ExternalAIRunner:
     def __init__(self, store: ForemanStore, rooms_dir: Optional[Path] = None, is_halted: Optional[Callable[[Optional[str]], bool]] = None,
                  resolver: Callable[[str], Optional[List[str]]] = resolve_command, memory: Callable[[], Optional[float]] = free_memory_gb,
-                 popen: Callable[..., Any] = subprocess.Popen, killer: Callable[[Any], None] = kill_tree) -> None:
+                 popen: Callable[..., Any] = winjob.popen_contained, killer: Callable[[Any], None] = kill_tree) -> None:
         self.store = store
         self.rooms_dir = rooms_dir or Path(tempfile.gettempdir()) / "ghost-foreman-meeting-rooms"
         self.is_halted = is_halted or (lambda project_id: False)
@@ -305,8 +311,9 @@ class ExternalAIRunner:
                 raise ExternalRunRefused(st["reason"] or f"{LABELS.get(harness, harness)} は使えません")
             row["free_gb_at_start"] = self._wait_for_capacity(run_id, project_id, time.monotonic() + MEMORY_WAIT_SECS)
             room: Optional[Path] = None
-            try:  # from here the run is reserved in self._procs; every exit below releases it
+            with self._lock:
                 info = self._procs[run_id]
+            try:  # from here the run is reserved in self._procs; every exit below releases it
                 room = self._room(run_id)
                 cmd = self._command(harness, self._resolve(harness) or [], room)
                 row["command"] = Path(cmd[0]).name + (" " + Path(cmd[1]).name if len(cmd) > 1 and cmd[1].endswith(".js") else "")
@@ -343,6 +350,10 @@ class ExternalAIRunner:
             finally:
                 with self._lock:
                     self._procs.pop(run_id, None)
+                    proc_done = info["proc"]
+                if proc_done is not None:
+                    # Closing the job ends anything the CLI left running (KILL_ON_JOB_CLOSE).
+                    winjob.release(proc_done)
                 if room is not None:
                     shutil.rmtree(room, ignore_errors=True)
             if info["killed"]:
@@ -350,6 +361,10 @@ class ExternalAIRunner:
                 result["error"] = result["error"] or f"{info['killed']}により終了しました"
         except ExternalRunRefused as exc:
             result["error"] = str(exc)
+        except winjob.JobSetupFailed as exc:
+            # Never run a CLI that the emergency stop could not end completely.
+            logger.warning("job object setup failed: %s", exc)
+            result["error"] = f"緊急停止で確実に止める仕組み（Job Object）を用意できなかったため起動しませんでした: {exc}"
         except Exception as exc:  # noqa: BLE001
             logger.exception("external run failed")
             result["error"] = f"起動できませんでした: {exc}"
@@ -372,6 +387,20 @@ class ExternalAIRunner:
                 pass
 
         threading.Thread(target=feed, daemon=True).start()
+
+        def end_leftovers() -> None:
+            # When the CLI itself exits, anything still in its job is a leftover. It would hold the output pipe open,
+            # so the run would wait for its timeout and then throw away an answer it already has. End it now.
+            # Output already written to the pipe stays readable. Not a stop: info["killed"] is left alone.
+            try:
+                proc.wait()
+            except Exception:  # noqa: BLE001
+                return
+            winjob.terminate(proc)
+
+        if winjob.has_job(proc):
+            threading.Thread(target=end_leftovers, daemon=True).start()
+
         def on_timeout() -> None:
             info["killed"] = f"{int(timeout)}秒のタイムアウト"
             self._kill(proc)
