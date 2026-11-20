@@ -9,7 +9,7 @@ Copy each section into the matching field of the Devpost form. The owner fills i
 - **Working demo / test build:** https://stmega99-jpg.github.io/ghost-foreman/ (sample data only; see "Testing")
 - **Video (under 3 minutes):** *add the YouTube URL*
 - **Blog post (Bonus Blog Prize):** *add the dev.to URL*
-- **Social post (Social Blitz Prize):** *add the URL of the post that starts with `#KiroweenHackathon26`*
+- **Social post (Social Blitz Prize):** *add the URL of the public Facebook post that starts with `#KiroweenHackathon26` (the text is kept outside the repository)*
 
 ---
 
