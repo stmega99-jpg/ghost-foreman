@@ -9,6 +9,8 @@ Built for **Kiroween 2026** (**Frankenstein** category, and the **Best Kiro Crew
 
 ## 1. What is Ghost Foreman?
 
+**Who it is for:** anyone who works with several AIs at once: solo developers, founders, writers, researchers, and people who don't write code. Nothing in it is specific to one field.
+
 When you run many AI sessions at once (Claude Code, Codex, Kiro), **the human becomes the bottleneck**: routine confirmation prompts, ambiguous design questions, and decisions that conflict with what you already decided.
 
 Ghost Foreman is an installable **Kiro Crew app** (`app.json`) that sits between you and your AIs, like a site foreman:
