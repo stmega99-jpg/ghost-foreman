@@ -284,6 +284,10 @@ class ForemanStore:
             ("proj-game", "アクションゲーム制作（見本）", "横スクロールのアクションゲーム（見本の案件）", 1, "active", 20.0, 0.0, now),
             ("proj-budget", "家計簿アプリ開発（見本）", "毎月の支出を記録する家計簿アプリ（見本の案件）", 2, "active", 15.0, 0.0, now),
             ("proj-foreman", "Ghost Foreman Crew App", "Kiroween 2026 出品用 Kiro Crew 現場監督アプリ", 1, "active", 10.0, 0.0, now),
+            # Made-up sample projects (the same five fields as the public demo). Nothing here is a real project.
+            ("proj-youtube", "YouTubeチャンネル運営（見本）", "動画の企画と台本（見本の案件）", 2, "active", 5.0, 0.0, now),
+            ("proj-shop", "オンラインショップ開業（見本）", "小さなオンラインショップの開店準備（見本の案件）", 2, "active", 10.0, 0.0, now),
+            ("proj-novel", "恋愛小説の執筆（見本）", "長編の恋愛小説（見本の案件）", 3, "active", 5.0, 0.0, now),
         ]
         with self._conn() as conn:
             conn.executemany(
@@ -349,6 +353,12 @@ class ForemanStore:
                 now,
                 now,
             ),
+            ("pol-youtube-01", "project", "proj-youtube", "動画の長さ（見本）", "動画は10分以内にまとめる。",
+             json.dumps(["動画", "長さ", "尺", "分"], ensure_ascii=False), 0, 1, 1, "human_spec", now, now),
+            ("pol-shop-01", "project", "proj-shop", "価格の表示（見本）", "価格はすべて税込みで表示する。",
+             json.dumps(["価格", "税込", "表示"], ensure_ascii=False), 0, 1, 1, "human_spec", now, now),
+            ("pol-novel-01", "project", "proj-novel", "語りの視点（見本）", "物語は主人公の一人称で書く。",
+             json.dumps(["一人称", "三人称", "視点", "語り"], ensure_ascii=False), 0, 1, 1, "human_spec", now, now),
         ]
         with self._conn() as conn:
             conn.executemany(
