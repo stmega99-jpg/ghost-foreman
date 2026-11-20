@@ -37,6 +37,7 @@ Everything below is labelled the same way in the app: **live** = verified agains
 | Free-tier routing and cost view (C) | **Live** (partial) | Gemini free tier with cooldown after quota errors; per-call usage records; cost shown as 未確認 (never $0). **Not implemented:** daily/weekly/monthly totals, budget reservation, resume-after-recovery scheduling. |
 | AI meetings (D) | **Live** (partial) | Kiro, Claude Code, Codex and Gemini in one meeting, three rounds, idea vault, "adopt an option → task". **Not implemented:** joining or swapping participants mid-meeting, pause/resume, time and cost limits per meeting. |
 | Selective memory (E) | **Live** (partial) | One-time vs permanent rule, global/project scope, versions, batch apply. **Not implemented:** edit/withdraw screen, conflict check, hand-off document generation. |
+| Projects | **Live** | Add, rename, archive and re-open your own projects (Details & settings → Projects). There is no delete: an archived project keeps its questions, rules and records. |
 | Notifications and modes (F) | **Live** (partial) | Home / away / sleep modes; Kiro Crew push; own iPhone app over Tailscale (end-to-end test passes). **Not confirmed:** push delivery to a real iPhone. |
 | Artifact review (G) | Not implemented | Left to Kiro Crew's own diff and browser features. |
 | Desktop Lease, PC control (H) | **Simulated** | A state record only. It does not control any screen, mouse or keyboard. |

@@ -18,13 +18,13 @@ let d = await dash();
 expect("the dashboard has the pieces the screen reads", ["projects", "slots", "questions", "policies", "audits", "meetings", "ideas", "news", "halt", "mode_state", "usage", "desktop_lease"].every((k) => k in d));
 expect("every slot says it is a sample, not a live AI", d.slots.length >= 6 && d.slots.every((s) => s.is_live === false));
 expect("the mode is labelled simulated", d.mode_state.gateway_mode === "simulated_gateway");
-expect("the sample projects come from different fields (a game, a product, an article)", d.projects.map((p) => p.name).join("|") === "ゲーム制作（見本）|商品企画（見本）|記事制作（見本）" && new Set(d.slots.map((s) => s.project_id)).size === 3 && new Set(d.questions.map((q) => q.project_id)).size === 3);
+expect("the sample projects come from five different fields", d.projects.map((p) => p.name).join("|") === "アクションゲーム制作（見本）|家計簿アプリ開発（見本）|YouTubeチャンネル運営（見本）|オンラインショップ開業（見本）|恋愛小説の執筆（見本）" && new Set(d.slots.map((s) => s.project_id)).size === 5 && new Set(d.questions.map((q) => q.project_id)).size === 3);
 expect("two questions wait for the human and one was answered by a rule", d.questions.filter((q) => q.status === "needs_human").length === 2 && d.questions.some((q) => q.status === "auto_resolved"));
 expect("the reply is Japanese in Japanese", strings(d.questions[0]).some((x) => JA.test(x)));
 lang = "en";
 d = await dash();
 expect("the sample text switches to English with the language", !strings({ q: d.questions, p: d.projects, s: d.slots, pol: d.policies, n: d.news, a: d.audits }).some((x) => JA.test(x)), strings({ q: d.questions, s: d.slots, pol: d.policies, n: d.news, a: d.audits }).filter((x) => JA.test(x)).slice(0, 2).join(" | "));
-expect("in English too", d.projects.map((p) => p.name).join("|") === "Game production (sample)|Product planning (sample)|Article writing (sample)");
+expect("in English too", d.projects.map((p) => p.name).join("|") === "Action game (sample)|Budgeting app (sample)|Running a YouTube channel (sample)|Opening an online shop (sample)|Writing a romance novel (sample)");
 lang = "ja";
 
 // a person's answer: one-time stays one-time, only an explicit choice makes a permanent rule
@@ -95,6 +95,21 @@ expect("save-only puts the minutes in the idea notebook", r.action === "saved_to
 await e.handle("POST", "/stop", { scope: "all" });
 expect("work cannot be handed to a stopped slot", (await rejects((async () => { const m3 = (e = make(), await e.handle("POST", "/meetings", { topic: "x", participants: [{ perspective: "a", harness: "kiro" }, { perspective: "b", harness: "kiro" }] })); now += 6000; await e.handle("POST", "/stop", { scope: "slot", target_id: "slot-03" }); return e.handle("POST", "/meetings/adopt", { meeting_id: m3.id, option_id: "opt1", target_slot_id: "slot-03" }); })())).status === 409);
 
+// projects: add, rename, archive, re-open; no delete
+e = make();
+lang = "ja";
+const np = await e.handle("POST", "/projects", { name: " 家計簿アプリ ", description: "毎月の支出" });
+expect("a project can be added, with a generated id", /^proj-/.test(np.id) && np.name === "家計簿アプリ" && np.status === "active" && (await dash()).projects.some((p) => p.id === np.id));
+expect("an empty or too long name is refused", (await rejects(e.handle("POST", "/projects", { name: " " }))).status === 400 && (await rejects(e.handle("POST", "/projects", { name: "x".repeat(81) }))).status === 400);
+expect("two active projects cannot share a name", (await rejects(e.handle("POST", "/projects", { name: "家計簿アプリ" }))).status === 400);
+r = await e.handle("POST", "/projects/update", { project_id: np.id, name: "家計簿アプリ開発" });
+expect("a project can be renamed", r.name === "家計簿アプリ開発" && r.description === "毎月の支出");
+r = await e.handle("POST", "/projects/update", { project_id: "proj-game", status: "archived" });
+d = await dash();
+expect("archiving keeps the project, its questions and its rules", r.status === "archived" && d.projects.some((p) => p.id === "proj-game") && d.questions.some((q) => q.project_id === "proj-game") && d.policies.some((p) => p.project_id === "proj-game"));
+expect("a bad status or an unknown project is refused", (await rejects(e.handle("POST", "/projects/update", { project_id: "proj-game", status: "deleted" }))).status === 400 && (await rejects(e.handle("POST", "/projects/update", { project_id: "nope", name: "x" }))).status === 400);
+r = await e.handle("POST", "/projects/update", { project_id: "proj-game", status: "active" });
+expect("an archived project can be re-opened", r.status === "active");
 // the rest
 e = make();
 expect("the harness list has all four AIs and the Gemini consent note", await (async () => { const h = await e.handle("GET", "/meetings/harnesses"); return h.harnesses.length === 4 && h.harnesses.find((x) => x.id === "gemini").consent_note.length > 20; })());

@@ -163,6 +163,19 @@ def dispatch_api_request(method: str, path: str, body: Dict[str, Any] | None = N
         )
         return 200, res
 
+    if method == "POST" and rel_path == "/projects":
+        # The person adds their own project. Nothing else is created with it.
+        return 200, store.create_project(payload.get("name"), payload.get("description", ""))
+
+    if method == "POST" and rel_path == "/projects/update":
+        # Rename / describe / archive / re-open. There is no delete: questions, rules and records keep their project.
+        return 200, store.update_project(
+            payload.get("project_id", ""),
+            name=payload.get("name"),
+            description=payload.get("description"),
+            status=payload.get("status"),
+        )
+
     if method == "POST" and rel_path == "/slots":
         slot = adapter.create_managed_slot(
             project_id=payload.get("project_id", "proj-game"),
@@ -305,6 +318,8 @@ def register_routes(ctx: Any = None) -> List[ForemanRoute]:
         ("POST", "/questions/resolve"),
         ("POST", "/meetings"),
         ("POST", "/meetings/adopt"),
+        ("POST", "/projects"),
+        ("POST", "/projects/update"),
         ("POST", "/slots"),
         ("GET", "/policies"),
         ("POST", "/slots/report"),

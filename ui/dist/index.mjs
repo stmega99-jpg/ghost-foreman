@@ -281,6 +281,25 @@ const EN = {
   "📥 判断待ちが {n} 件あります。": "📥 {n} question(s) waiting for you.",
   "答える": "Answer",
   "言語": "Language",
+  "案件の管理": "Projects",
+  "案件の名前": "Project name",
+  "案件の説明": "Project description",
+  "説明（任意）": "Description (optional)",
+  "保存する": "Save",
+  "やめる": "Cancel",
+  "終了した案件": "Archived",
+  "進行中": "Active",
+  "名前・説明を変える": "Rename or edit the description",
+  "再開する": "Re-open",
+  "終了する": "Archive",
+  "「{name}」を終了しますか？\n（質問・ルール・記録は残ります。案件を選ぶ欄に出なくなるだけです。あとで再開できます）": "Archive \"{name}\"?\n(Its questions, rules and records are kept. It only stops appearing where you pick a project. You can re-open it later.)",
+  "あなたが進めている仕事を、案件として登録します。AIへの相談・質問・ルールは、案件ごとに分けて扱われます。": "Register the work you are doing as projects. Consultations, the AIs' questions and your rules are kept separate for each project.",
+  "案件の名前（例: 家計簿アプリ、YouTubeチャンネル運営）": "Project name (e.g. budgeting app, running a YouTube channel)",
+  "新しい案件の名前": "New project name",
+  "新しい案件の説明": "New project description",
+  "＋ 案件を追加する": "+ Add the project",
+  "＋ 案件を追加": "+ Add a project",
+  "まず案件を追加してください（「＋ 案件を追加」から）。": "Add a project first (with \"+ Add a project\").",
 };
 
 // Fixed labels the backend writes into its records (shown in the language of the screen). Anything not listed, and all
@@ -602,7 +621,7 @@ function MeetingCard({ m, d, call }) {
         sm.note && m.status !== "failed" ? h("div", { style: S.mute }, tb(sm.note)) : null) : null) : null);
 }
 
-function Consult({ d, call }) {
+function Consult({ d, call, go }) {
   const [topic, setTopic] = useState("");
   const [harnesses, setHarnesses] = useState({ harnesses: [] });
   const [limits, setLimits] = useState({ min: 2, max: 5 });
@@ -613,7 +632,9 @@ function Consult({ d, call }) {
   const [organiser, setOrganiser] = useState("kiro");
   const [geminiOk, setGeminiOk] = useState(false); // the human's answer for THIS meeting; reset after each start
   const [showFailed, setShowFailed] = useState(false);
-  const [project, setProject] = useState(d.projects[0] ? d.projects[0].id : "proj-foreman");
+  const [project, setProject] = useState(() => { const a = activeProjects(d); return a[0] ? a[0].id : ""; });
+  // If the chosen project was archived (or none was chosen yet), the first active one is used.
+  const projectNow = activeProjects(d).some((p) => p.id === project) ? project : ((activeProjects(d)[0] || {}).id || "");
   const seeded = useRef(false);
   const apply = (r, first) => {
     if (!r) return;
@@ -646,13 +667,14 @@ function Consult({ d, call }) {
   const letter = (i) => String.fromCharCode(65 + i);
 
   let why = "";
-  if (!topic.trim()) why = t("相談したいことを入力してください。");
+  if (!projectNow) why = t("まず案件を追加してください（「＋ 案件を追加」から）。");
+  else if (!topic.trim()) why = t("相談したいことを入力してください。");
   else if (effective.length < limits.min) why = t("AIを {min} つ以上選んでください。", { min: limits.min });
   else if (effective.length > limits.max) why = t("AIは {max} つまでです。", { max: limits.max });
   else if (blocked.length) why = t("使えないAIが選ばれています。外すか、「再確認」してください。");
   else if (usesGemini && !geminiOk) why = t("Gemini を使うには、下の送信の許可にチェックしてください。");
   const start = () => call("POST", "/meetings", {
-    project_id: project, topic: topic.trim(),
+    project_id: projectNow, topic: topic.trim(),
     participants: effective.map((p) => ({ perspective: p.perspective.trim(), harness: p.harness })),
     synthesizer_harness: organiser, allow_unpublished_to_gemini: usesGemini && geminiOk === true,
     language: LANG,
@@ -668,7 +690,8 @@ function Consult({ d, call }) {
       h("h3", { style: S.h3 }, t("① 何を相談しますか？")),
       h("div", { style: { ...S.row, marginBottom: 8 } },
         h("span", { style: S.mute }, t("どの案件？")),
-        h("select", { style: { ...S.input, flex: "0 0 auto" }, value: project, onChange: (e) => setProject(e.target.value), "aria-label": t("案件") }, ...d.projects.map((p) => h("option", { key: p.id, value: p.id }, p.name)))),
+        h("select", { style: { ...S.input, flex: "0 0 auto" }, value: projectNow, onChange: (e) => setProject(e.target.value), "aria-label": t("案件") }, ...activeProjects(d).map((p) => h("option", { key: p.id, value: p.id }, p.name))),
+        go ? h("button", { style: S.btn, onClick: () => go("details:projects") }, t("＋ 案件を追加")) : null),
       h("input", { style: { ...S.input, width: "100%", boxSizing: "border-box", fontSize: 16 }, value: topic, onChange: (e) => setTopic(e.target.value), placeholder: t("相談したいこと（例: セーブ時の安心感を与える演出）"), "aria-label": t("相談したいこと") })),
     h("div", { style: S.card },
       h("h3", { style: S.h3 }, t("② 誰に相談しますか？（2つ以上選んでください）")),
@@ -735,7 +758,7 @@ function News({ d, call }) {
   const [err, setErr] = useState("");
   const add = async () => {
     setBusy(true); setErr("");
-    try { await call("POST", "/news/summarize", { project_id: (d.projects[0] || {}).id || "proj-foreman", url: url.trim(), reason: t("手動で指定されたURL") }); setUrl(""); }
+    try { await call("POST", "/news/summarize", { project_id: (activeProjects(d)[0] || {}).id || "", url: url.trim(), reason: t("手動で指定されたURL") }); setUrl(""); }
     catch (e) { setErr(String((e && e.message) || e)); }
     setBusy(false);
   };
@@ -850,10 +873,52 @@ function DetailSlots({ d, call }) {
     ...d.slots.map((s) => h(SlotCard, { key: s.id, d, s, call, technical: true })));
 }
 
-const DETAIL_SECTIONS = [["settings", T("通知・送信の設定")], ["cost", T("費用と使用量")], ["runs", T("外部AIの実行記録")], ["notices", T("通知の履歴")], ["audit", T("判断の記録")], ["slots", T("AIの一覧（技術情報）")]];
+// The person's own projects: add, rename, archive, re-open. There is no delete, because questions, rules and records
+// keep pointing at their project; an archived project is only left out of the project pickers.
+function ProjectRow({ p, call }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(p.name);
+  const [desc, setDesc] = useState(p.description || "");
+  const archived = p.status === "archived";
+  const save = () => call("POST", "/projects/update", { project_id: p.id, name: name.trim(), description: desc.trim() }).then(() => setEditing(false)).catch(() => {});
+  return h("div", { style: { ...S.card, ...(archived ? { opacity: 0.7 } : {}) } },
+    editing
+      ? h("div", null,
+          h("input", { style: { ...S.input, width: "100%", boxSizing: "border-box" }, value: name, maxLength: 80, onChange: (e) => setName(e.target.value), "aria-label": t("案件の名前") }),
+          h("input", { style: { ...S.input, width: "100%", boxSizing: "border-box", marginTop: 6 }, value: desc, maxLength: 300, onChange: (e) => setDesc(e.target.value), placeholder: t("説明（任意）"), "aria-label": t("案件の説明") }),
+          h("div", { style: { ...S.row, marginTop: 6 } },
+            h("button", { style: S.btnOk, disabled: !name.trim(), onClick: save }, t("保存する")),
+            h("button", { style: S.btn, onClick: () => { setName(p.name); setDesc(p.description || ""); setEditing(false); } }, t("やめる"))))
+      : h("div", null,
+          h("div", { style: { ...S.row, justifyContent: "space-between" } },
+            h("strong", null, p.name),
+            archived ? h(Badge, { text: t("終了した案件") }) : h(Badge, { text: t("進行中"), color: C.ok })),
+          p.description ? h("div", { style: S.mute }, p.description) : null,
+          h("div", { style: { ...S.row, marginTop: 6 } },
+            h("button", { style: S.btn, onClick: () => setEditing(true) }, t("名前・説明を変える")),
+            archived
+              ? h("button", { style: S.btn, onClick: () => call("POST", "/projects/update", { project_id: p.id, status: "active" }).catch(() => {}) }, t("再開する"))
+              : h("button", { style: S.btn, onClick: () => { if (window.confirm(t("「{name}」を終了しますか？\n（質問・ルール・記録は残ります。案件を選ぶ欄に出なくなるだけです。あとで再開できます）", { name: p.name }))) call("POST", "/projects/update", { project_id: p.id, status: "archived" }).catch(() => {}); } }, t("終了する")))));
+}
+function DetailProjects({ d, call }) {
+  const [name, setName] = useState("");
+  const [desc, setDesc] = useState("");
+  const list = [...(d.projects || [])].sort((a, b) => Number(a.status === "archived") - Number(b.status === "archived"));
+  const add = () => call("POST", "/projects", { name: name.trim(), description: desc.trim() }).then(() => { setName(""); setDesc(""); }).catch(() => {});
+  return h("div", null,
+    h("div", { style: S.card },
+      h("div", { style: S.mute }, t("あなたが進めている仕事を、案件として登録します。AIへの相談・質問・ルールは、案件ごとに分けて扱われます。")),
+      h("input", { style: { ...S.input, width: "100%", boxSizing: "border-box", marginTop: 8 }, value: name, maxLength: 80, onChange: (e) => setName(e.target.value), placeholder: t("案件の名前（例: 家計簿アプリ、YouTubeチャンネル運営）"), "aria-label": t("新しい案件の名前") }),
+      h("input", { style: { ...S.input, width: "100%", boxSizing: "border-box", marginTop: 6 }, value: desc, maxLength: 300, onChange: (e) => setDesc(e.target.value), placeholder: t("説明（任意）"), "aria-label": t("新しい案件の説明") }),
+      h("button", { style: { ...S.btnOk, marginTop: 8 }, disabled: !name.trim(), onClick: add }, t("＋ 案件を追加する"))),
+    ...list.map((p) => h(ProjectRow, { key: p.id + ":" + p.name + ":" + p.status, p, call })));
+}
+const activeProjects = (d) => (d.projects || []).filter((p) => p.status !== "archived");
+
+const DETAIL_SECTIONS = [["projects", T("案件の管理")], ["settings", T("通知・送信の設定")], ["cost", T("費用と使用量")], ["runs", T("外部AIの実行記録")], ["notices", T("通知の履歴")], ["audit", T("判断の記録")], ["slots", T("AIの一覧（技術情報）")]];
 
 function Details({ d, call, section, setSection }) {
-  const body = { settings: DetailSettings, cost: DetailCost, runs: DetailRuns, notices: DetailNotices, audit: Audit, slots: DetailSlots }[section] || DetailSettings;
+  const body = { projects: DetailProjects, settings: DetailSettings, cost: DetailCost, runs: DetailRuns, notices: DetailNotices, audit: Audit, slots: DetailSlots }[section] || DetailSettings;
   return h("div", null,
     h("div", { style: S.mute }, t("ふだんは使わない、設定と記録です。")),
     h("div", { style: { ...S.row, margin: "8px 0 12px" } }, ...DETAIL_SECTIONS.map(([key, label]) => h("button", { key, style: { ...S.btn, ...(section === key ? { background: C.accent, color: "#0d0b18" } : {}) }, onClick: () => setSection(key) }, t(label)))),
