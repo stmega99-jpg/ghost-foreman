@@ -18,11 +18,13 @@ let d = await dash();
 expect("the dashboard has the pieces the screen reads", ["projects", "slots", "questions", "policies", "audits", "meetings", "ideas", "news", "halt", "mode_state", "usage", "desktop_lease"].every((k) => k in d));
 expect("every slot says it is a sample, not a live AI", d.slots.length >= 6 && d.slots.every((s) => s.is_live === false));
 expect("the mode is labelled simulated", d.mode_state.gateway_mode === "simulated_gateway");
+expect("the sample projects come from different fields (a game, a product, an article)", d.projects.map((p) => p.name).join("|") === "ゲーム制作（見本）|商品企画（見本）|記事制作（見本）" && new Set(d.slots.map((s) => s.project_id)).size === 3 && new Set(d.questions.map((q) => q.project_id)).size === 3);
 expect("two questions wait for the human and one was answered by a rule", d.questions.filter((q) => q.status === "needs_human").length === 2 && d.questions.some((q) => q.status === "auto_resolved"));
 expect("the reply is Japanese in Japanese", strings(d.questions[0]).some((x) => JA.test(x)));
 lang = "en";
 d = await dash();
 expect("the sample text switches to English with the language", !strings({ q: d.questions, p: d.projects, s: d.slots, pol: d.policies, n: d.news, a: d.audits }).some((x) => JA.test(x)), strings({ q: d.questions, s: d.slots, pol: d.policies, n: d.news, a: d.audits }).filter((x) => JA.test(x)).slice(0, 2).join(" | "));
+expect("in English too", d.projects.map((p) => p.name).join("|") === "Game production (sample)|Product planning (sample)|Article writing (sample)");
 lang = "ja";
 
 // a person's answer: one-time stays one-time, only an explicit choice makes a permanent rule

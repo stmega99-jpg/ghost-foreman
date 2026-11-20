@@ -28,22 +28,23 @@ const RUNTIME = { kiro: "Kiro Crew で実行", claude: "Kiro Crew 外で実行",
 const HARNESS_LABEL = { kiro: "Kiro", claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
 
 // ------------------------------------------------------------------ sample data
+// Three different kinds of work on purpose (a game, a product, an article): Ghost Foreman is not tied to one field.
 function initialProjects(ts) {
   return [
-    { id: "proj-game", name: L("アクションゲーム制作（見本）", "Action game (sample)"), description: L("見本の案件です", "A sample project"), priority: 1, status: "active", budget_usd: 20, spent_usd: 0, created_at: ts },
-    { id: "proj-foreman", name: L("Ghost Foreman Crew App", "Ghost Foreman Crew App"), description: L("見本の案件です", "A sample project"), priority: 1, status: "active", budget_usd: 10, spent_usd: 0, created_at: ts },
-    { id: "proj-cards", name: L("家計簿アプリ開発（見本）", "Budgeting app (sample)"), description: L("見本の案件です", "A sample project"), priority: 2, status: "active", budget_usd: 15, spent_usd: 0, created_at: ts },
+    { id: "proj-game", name: L("ゲーム制作（見本）", "Game production (sample)"), description: L("見本の案件です", "A sample project"), priority: 1, status: "active", budget_usd: 20, spent_usd: 0, created_at: ts },
+    { id: "proj-product", name: L("商品企画（見本）", "Product planning (sample)"), description: L("見本の案件です", "A sample project"), priority: 1, status: "active", budget_usd: 10, spent_usd: 0, created_at: ts },
+    { id: "proj-article", name: L("記事制作（見本）", "Article writing (sample)"), description: L("見本の案件です", "A sample project"), priority: 2, status: "active", budget_usd: 15, spent_usd: 0, created_at: ts },
   ];
 }
 const SLOT_DEFS = [
-  ["slot-01", "proj-game", "Claude-Code #1 (Save/API)", "claude-code", L("実装担当", "Implementation"), "working", L("セーブデータ読み書きの実装", "Implementing save-data read/write"), L("オートセーブのテスト作成", "Write auto-save tests"), "feat/save"],
-  ["slot-02", "proj-game", "Codex #1 (Physics)", "codex", L("物理挙動", "Physics"), "waiting_human", L("ジャンプの物理の調整", "Tuning the jump physics"), "", "feat/physics"],
+  ["slot-01", "proj-game", "Claude-Code #1 (Save data)", "claude-code", L("実装担当", "Implementation"), "working", L("セーブデータ読み書きの実装", "Implementing save-data read/write"), L("オートセーブのテスト作成", "Write auto-save tests"), "feat/save"],
+  ["slot-02", "proj-game", "Codex #1 (Data design)", "codex", L("データ設計", "Data design"), "waiting_human", L("セーブ形式の検討", "Choosing the save format"), "", "feat/save-format"],
   ["slot-03", "proj-game", "Kiro #1 (Review)", "kiro", L("査読担当", "Review"), "idle", L("待機中", "Waiting for work"), L("セーブ実装のレビュー", "Review the save implementation"), ""],
-  ["slot-04", "proj-foreman", "Kiro #2 (UI)", "kiro", L("UI実装", "UI"), "working", L("スマホ画面の整理", "Tidying the phone screen"), "", "feat/ui"],
-  ["slot-05", "proj-foreman", "Claude-Code #2 (Spec)", "claude-code", L("仕様監査", "Spec audit"), "waiting_human", L("仕様と実装のずれの確認", "Checking spec against code"), "", ""],
-  ["slot-06", "proj-cards", "Codex #2 (Battle)", "codex", L("集計ロジック", "Battle logic"), "working", L("ダメージ計算の実装", "Implementing damage calculation"), L("単体テスト", "Unit tests"), "feat/battle"],
-  ["slot-07", "proj-cards", "Claude-Code #3 (Tests)", "claude-code", L("単体テスト", "Unit tests"), "idle", L("待機中", "Waiting for work"), "", ""],
-  ["slot-08", "proj-cards", "Kiro #3 (Docs)", "kiro", L("資料整理", "Documents"), "idle", L("待機中", "Waiting for work"), "", ""],
+  ["slot-04", "proj-product", "Kiro #2 (Research)", "kiro", L("市場調査", "Market research"), "working", L("似た商品3つの価格の比較", "Comparing the prices of three similar products"), L("発売時期の候補を出す", "Suggest launch dates"), ""],
+  ["slot-05", "proj-product", "Claude-Code #2 (Launch plan)", "claude-code", L("発売計画", "Launch plan"), "waiting_human", L("発売までの作業表づくり", "Writing the launch checklist"), "", ""],
+  ["slot-06", "proj-article", "Codex #2 (Draft)", "codex", L("下書き", "Drafting"), "working", L("記事の下書き（約2,000字）", "Drafting the article (about 1,000 words)"), L("見出しの案を3つ", "Three headline ideas"), ""],
+  ["slot-07", "proj-article", "Claude-Code #3 (Fact check)", "claude-code", L("事実確認", "Fact check"), "idle", L("待機中", "Waiting for work"), "", ""],
+  ["slot-08", "proj-article", "Kiro #3 (Editing)", "kiro", L("校正", "Editing"), "idle", L("待機中", "Waiting for work"), "", ""],
 ];
 function initialSlots(ts) {
   return SLOT_DEFS.map(([id, project_id, name, backend, role, status, current_task, next_task, worktree_branch]) => ({
@@ -68,8 +69,8 @@ function initialQuestions(ts) {
       probe_history: [],
     },
     {
-      id: "q-demo-2", project_id: "proj-foreman", slot_id: "slot-05", kind: "natural_question",
-      raw_question: L("確認用に、有料のAI APIを少しだけ使ってもよいですか？", "May I use a paid AI API a little, just to check something?"),
+      id: "q-demo-2", project_id: "proj-product", slot_id: "slot-05", kind: "natural_question",
+      raw_question: L("価格の比較のために、有料のAI APIを少しだけ使ってもよいですか？", "May I use a paid AI API a little, to compare prices?"),
       context_summary: L("お金がかかる話なので、幽霊は代わりに答えません。", "This involves cost, so the Ghost does not answer for you."),
       recommendation: "", recommendation_reason: "",
       status: "needs_human", probe_count: 0, proposes_spec_change: 0, conflict_with_slot: "", resolution_source: "", final_answer: "", policy_id_applied: "",
@@ -78,13 +79,13 @@ function initialQuestions(ts) {
       probe_history: [],
     },
     {
-      id: "q-demo-3", project_id: "proj-game", slot_id: "slot-01", kind: "natural_question",
-      raw_question: L("日時の保存形式はどうしますか？", "What format should dates be saved in?"),
-      context_summary: L("決めてあるルール（pol-game-01）に合ったため、あなたを呼ばずに幽霊が答えました。", "A rule you set earlier (pol-game-01) matched, so the Ghost answered without calling you."),
+      id: "q-demo-3", project_id: "proj-article", slot_id: "slot-06", kind: "natural_question",
+      raw_question: L("記事の文体は「です・ます」と「だ・である」のどちらにしますか？", "Should the article use a friendly or a formal tone?"),
+      context_summary: L("決めてあるルール（pol-article-01）に合ったため、あなたを呼ばずに幽霊が答えました。", "A rule you set earlier (pol-article-01) matched, so the Ghost answered without calling you."),
       recommendation: "", recommendation_reason: "",
       status: "auto_resolved", probe_count: 0, proposes_spec_change: 0, conflict_with_slot: "", resolution_source: "ghost_policy",
-      final_answer: L("【幽霊の代理判断（根拠: pol-game-01）】日時はすべて ISO8601 の UTC 文字列で保存してください。", "[The Ghost's decision on your behalf (basis: pol-game-01)] Save every date as an ISO 8601 UTC string."),
-      policy_id_applied: "pol-game-01", created_at: ts, updated_at: ts, options: [], probe_history: [],
+      final_answer: L("【幽霊の代理判断（根拠: pol-article-01）】記事はすべて「です・ます」調で、やわらかく書いてください。", "[The Ghost's decision on your behalf (basis: pol-article-01)] Write every article in a friendly tone."),
+      policy_id_applied: "pol-article-01", created_at: ts, updated_at: ts, options: [], probe_history: [],
     },
   ];
 }
@@ -94,13 +95,14 @@ function initialPolicies(ts) {
     mk("pol-global-01", "global", "*", L("有料APIを勝手に使わない", "Never use a paid API without permission"), L("無料枠か契約済みの枠を優先し、人間の許可なしに従量課金のAPIへ切り替えない。", "Prefer free or already-contracted quotas, and never switch to a pay-per-use API without a human's permission."), 1),
     mk("pol-global-02", "global", "*", L("緊急停止のあとは、人間が許可するまで再開しない", "After an emergency stop, nothing resumes until a human allows it"), L("停止を解除できるのは人間だけ。解除しても、止まっていた作業は自動では再開しない。", "Only a human can release a stop. Releasing it does not restart stopped work by itself."), 1),
     mk("pol-game-01", "project", "proj-game", L("日時の保存形式", "Date format"), L("日時はすべて ISO8601 の UTC 文字列で保存する。", "Save every date as an ISO 8601 UTC string."), 0),
-    mk("pol-cards-01", "project", "proj-cards", L("ダメージは整数", "Damage is an integer"), L("ダメージの計算結果は整数に丸める。", "Round the result of a damage calculation to an integer."), 0),
+    mk("pol-product-01", "project", "proj-product", L("価格の表示", "How prices are shown"), L("価格はすべて税込みで表示する。", "Show every price including tax."), 0),
+    mk("pol-article-01", "project", "proj-article", L("記事の文体", "Article tone"), L("記事はすべて「です・ます」調で、やわらかく書く。", "Write every article in a friendly tone."), 0),
   ];
 }
 function initialNews(ts) {
   return [
     {
-      id: "news-demo-1", project_id: "proj-game", category: L("市場の動き（見本）", "Market trends (sample)"), title: L("アクションの新作の傾向（見本）", "Trends in new action games (sample)"),
+      id: "news-demo-1", project_id: "proj-product", category: L("市場の動き（見本）", "Market trends (sample)"), title: L("小さな商品の発売時期の傾向（見本）", "When small products tend to launch (sample)"),
       url: "https://example.com/sample-news", published_date: ts.slice(0, 10),
       facts_summary: L("【事実（見本）】これは見本のデータです。実際のニュースではありません。", "[Fact (sample)] This is sample data, not real news."),
       estimates_summary: L("【推定（見本）】推定は事実と分けて書きます。", "[Estimate (sample)] Estimates are written apart from facts."),
@@ -108,7 +110,6 @@ function initialNews(ts) {
     },
   ];
 }
-
 // ------------------------------------------------------------------ the meeting sample
 const CANNED = [
   {
@@ -205,7 +206,7 @@ export function createEngine({ getLang = () => "ja", clock = () => new Date() } 
   const snapshotHalt = () => ({ ...s.halt, projects: [...s.halt.projects], slots: [...s.halt.slots], active: s.halt.all || s.halt.projects.length > 0 || s.halt.slots.length > 0 });
   const audit = (q, actor, action_type, answer_sent, rationale, policy = "") =>
     s.audits.unshift({ id: uid("aud"), question_id: q.id, project_id: q.project_id, slot_id: q.slot_id, actor, action_type, raw_question: q.raw_question, referenced_policy_id: policy, answer_sent, rationale, promoted_to_policy_id: "", reverted: 0, created_at: nowIso(clock()) });
-  audit(s.questions[2], "ghost_foreman", "auto_reply", s.questions[2].final_answer, L("決めてあるルール pol-game-01 を適用して、すぐに作業を続けさせました。", "Applied the rule pol-game-01 and let the work continue at once."), "pol-game-01");
+  audit(s.questions[2], "ghost_foreman", "auto_reply", s.questions[2].final_answer, L("決めてあるルール pol-article-01 を適用して、すぐに作業を続けさせました。", "Applied the rule pol-article-01 and let the work continue at once."), "pol-article-01");
 
   // A meeting reveals one round per STAGE_MS since it started (so it can be tested with a fake clock).
   function visibleMeeting(m) {
@@ -356,7 +357,7 @@ export function createEngine({ getLang = () => "ja", clock = () => new Date() } 
       try { const u = new URL(url); ok = u.protocol === "https:" || u.protocol === "http:"; } catch { ok = false; }
       if (!ok) { const e = new Error(getLang() === "en" ? "Please enter a web address that starts with https://" : "https:// で始まるWebアドレスを入力してください"); e.status = 422; throw e; }
       // Canned on purpose: the address is never opened, so the demo cannot fetch anything.
-      const item = { id: uid("news-demo"), project_id: b.project_id || "proj-foreman", category: L("ニュース（見本）", "News (sample)"), title: L("見本のまとめ（このアドレスは開いていません）", "A sample summary (this address was not opened)"), url, published_date: nowIso(clock()).slice(0, 10),
+      const item = { id: uid("news-demo"), project_id: b.project_id || "proj-product", category: L("ニュース（見本）", "News (sample)"), title: L("見本のまとめ（このアドレスは開いていません）", "A sample summary (this address was not opened)"), url, published_date: nowIso(clock()).slice(0, 10),
         facts_summary: L("【事実（見本）】デモでは、入力されたアドレスを開きません。固定の見本を表示しています。", "[Fact (sample)] The demo does not open the address you typed. It shows a fixed sample."), estimates_summary: L("【推定（見本）】なし", "[Estimate (sample)] None"),
         relevance_reason: String(b.reason || ""), created_at: nowIso(clock()) };
       s.news.unshift(item);

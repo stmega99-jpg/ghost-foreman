@@ -43,6 +43,7 @@ const clickText = async (label, nth = 0) => page.evaluate((l, n) => { const b = 
 
 await page.goto(origin + base + "/demo/index.html", { waitUntil: "domcontentloaded" });
 expect("opens in English in an English browser", await waitText("What would you like to do?"));
+expect("the sample projects show work from different fields", await (async () => { await clickText("Consult the AIs"); await waitText("Which project?"); const txt = await text(); await clickText("Back to home"); return ["Game production (sample)", "Product planning (sample)", "Article writing (sample)"].every((x) => txt.includes(x)); })());
 expect("the banner says it is sample data, in English", (await text()).includes("Demo with sample data. No real AI, account or PC is connected"));
 await clickText("See how the AIs are doing"); await new Promise((r) => setTimeout(r, 500)); await dump("ais");
 expect("the screen says its AIs are samples, not real", await waitText("demo samples (not real AIs)"));
