@@ -159,6 +159,7 @@ class ForemanSupervisor:
             f"確定ルール:\n{listing}\n\n質問:\n<<<\n{question}\n>>>\n\n"
             "質問の答えがいずれかの確定ルールだけで直接決まる場合に限り、そのルールを選んでください。"
             "関連が薄い、または一部しか答えないなら null にしてください。\n"
+            "reason は、質問と同じ言語で書いてください。\n"
             '次のJSONだけを返してください: {"policy_id":"ルールのid または null","confidence":0.0から1.0,"reason":"短い理由"}'
         )
         try:
@@ -409,6 +410,9 @@ class ForemanSupervisor:
         # 4. Unknown policy: Perform Reverse-Probe (逆質問) first if options/impact are missing (Spec A-3, A-4)
         probe_history: List[Dict[str, str]] = []
         probe_count = 0
+        # The asking AI already gave its options: they are shown as they are. No probe ran, so the Ghost makes no
+        # recommendation of its own (a fixed sentence here would read as a real judgement).
+        agent_gave_options = bool(options)
         if not options:
             probe_count = 1
             probe_prompt = (
@@ -441,11 +445,16 @@ class ForemanSupervisor:
                 },
             ]
 
-        context_msg = (
-            f"AI同士の意見衝突（{slot_id} vs {conflict_with_slot}）を検出し論点を整理しました。"
-            if conflict_with_slot
-            else "制作ルールに未登録の判断事項です。幽霊が担当AIへ先に逆質問し、選択肢と影響範囲を整理しました。"
-        )
+        if conflict_with_slot:
+            context_msg = f"AI同士の意見衝突（{slot_id} vs {conflict_with_slot}）を検出し論点を整理しました。"
+        elif agent_gave_options:
+            context_msg = "制作ルールに未登録の判断事項です。担当AIが示した選択肢を、そのまま表示しています。"
+        else:
+            context_msg = "制作ルールに未登録の判断事項です。幽霊が担当AIへ先に逆質問し、選択肢と影響範囲を整理しました。"
+        recommendation = "" if agent_gave_options else (options[0]["id"] if options else "")
+        recommendation_reason = "" if agent_gave_options else "個人開発・配布のしやすさと既存設計との整合性から、外部依存を増やさない案Aを推奨します。"
+        waiting_reason = ("人間の判断待ち（担当AIが示した選択肢）" if agent_gave_options
+                          else "幽霊が逆質問で論点整理済 → 人間の判断待ち（独立タスクへ一時切替中）")
 
         with self.store._conn() as conn:
             conn.execute(
@@ -462,8 +471,8 @@ class ForemanSupervisor:
                     raw_question,
                     context_msg,
                     json.dumps(options, ensure_ascii=False),
-                    options[0]["id"] if options else "",
-                    "個人開発・配布のしやすさと既存設計との整合性から、外部依存を増やさない案Aを推奨します。",
+                    recommendation,
+                    recommendation_reason,
                     probe_count,
                     json.dumps(probe_history, ensure_ascii=False),
                     conflict_with_slot,
@@ -472,8 +481,8 @@ class ForemanSupervisor:
                 ),
             )
             conn.execute(
-                "UPDATE managed_slots SET status = 'waiting_human', waiting_reason = '幽霊が逆質問で論点整理済 → 人間の判断待ち（独立タスクへ一時切替中）', updated_at = ? WHERE id = ?",
-                (now, slot_id),
+                "UPDATE managed_slots SET status = 'waiting_human', waiting_reason = ?, updated_at = ? WHERE id = ?",
+                (waiting_reason, now, slot_id),
             )
         self.notifier.decision_needed(qid)
         return self.get_question(qid)

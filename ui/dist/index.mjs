@@ -282,6 +282,12 @@ const EN = {
   "答える": "Answer",
   "言語": "Language",
   "案件の管理": "Projects",
+  "幽霊の判定": "The Ghost's judgement",
+  "幽霊からAIへの逆質問": "The Ghost asks the AI back",
+  "AIの返答": "The AI's answer",
+  "あなたの質問": "Your question",
+  "幽霊の説明": "The Ghost's explanation",
+  "AIの再確認": "The AI checks again",
   "案件の名前": "Project name",
   "案件の説明": "Project description",
   "説明（任意）": "Description (optional)",
@@ -317,6 +323,17 @@ const EN_B = {
   "幽霊（整理役）": "Ghost (organiser)",
   "Gateway未接続（模擬モード）": "Gateway not connected (simulated mode)",
   "未設定": "Not set up",
+  "制作ルールに未登録の判断事項です。担当AIが示した選択肢を、そのまま表示しています。": "No rule you set covers this yet. These are the options the AI gave, shown as they are.",
+  "制作ルールに未登録の判断事項です。幽霊が担当AIへ先に逆質問し、選択肢と影響範囲を整理しました。": "No rule you set covers this yet. The Ghost asked the AI back first and summarised the options and their impact.",
+  "制作ルールに未登録の判断事項です。幽霊が担当AIへ逆質問中です（実セッションの返答待ち）。": "No rule you set covers this yet. The Ghost is asking the AI back (waiting for the real session's answer).",
+  "幽霊が担当AIへ逆質問し、実際の返答から選択肢と影響を整理しました。": "The Ghost asked the AI back and summarised the options and their impact from its real answer.",
+  "担当AIの回答に基づく推奨です。": "Recommended from the AI's own answer.",
+  "担当AIから構造化された選択肢を得られませんでした。原文と返答をご確認ください。": "The AI did not give options in the expected form. Please read the question and its answer.",
+  "人間の判断待ち（担当AIが示した選択肢）": "Waiting for your decision (options given by the AI)",
+  "確定ルールなし": "No rules set",
+  "判定係": "Judge",
+  "会議参加者": "Meeting participant",
+  "議事整理": "Meeting organiser",
   "人間による個別停止（再開は人間の許可が必要）": "Stopped by a human, this AI only (a human must allow the restart)",
   "人間によるプロジェクト一括停止（再開は人間の許可が必要）": "Stopped by a human, the whole project (a human must allow the restart)",
   "人間による全エージェント緊急停止（再開は人間の許可が必要）": "Emergency stop of every AI by a human (a human must allow the restart)",
@@ -334,6 +351,12 @@ const EN_BP = [
   [/^緊急停止により終了しました$/, () => "Ended by the emergency stop"],
   [/^(\d+)秒のタイムアウトにより終了しました$/, (m) => `Ended after a ${m[1]}-second time limit`],
   [/^報告: ([\s\S]*)$/, (m) => `Report: ${m[1]}`],
+  [/^確定ルール (\S+) に合致したため人間を呼ばずに自動回答しました（([\s\S]*)）。$/, (m) => `A rule you set (${m[1]}) matched, so the Ghost answered without calling you (${tb(m[2])}).`],
+  [/^判定: (\S+) 確信度([\d.]+) ?([\s\S]*?)(?:（(\S+)から切替）)?$/, (m) => `Judged by ${m[1]}, confidence ${m[2]}${m[3] ? ": " + m[3] : ""}${m[4] ? ` (switched from ${m[4]})` : ""}`],
+  [/^判定: (\S+)$/, (m) => `Judging: ${m[1]}`],
+  [/^幽霊・判定係\((.*)\)$/, (m) => `Ghost judge (${m[1]})`],
+  [/^【Ghost Foreman 代理判断（根拠: (\S+) \/ ([^）]*)）】\n([\s\S]*)\n上記確定ルールに従い実装を継続してください。$/, (m) => `[The Ghost's decision on your behalf (basis: ${m[1]} / ${m[2]})]\n${m[3]}\nPlease continue, following the rule above.`],
+  [/^判定AIが利用できないため自動回答せず人間の判断待ちにしました（([\s\S]*)）$/, (m) => `The judging AI was not available, so nothing was answered automatically; this waits for you (${m[1]})`],
   [/^会議が失敗しました: (.*)$/, (m) => `The meeting failed: ${tb(m[1])}`],
   [/^会議を中止しました: (.*)$/, (m) => `The meeting was cancelled: ${tb(m[1])}`],
   [/^緊急停止されたため、会議を中止しました$/, () => "The meeting was cancelled because of the emergency stop"],
@@ -349,6 +372,11 @@ const EN_FRAG = [
   ["幽霊の論点整理を得られませんでした。各ラウンドの発言をご確認ください。", "The Ghost could not produce a summary. Please read what was said in each round."],
   ["整理役の返答が構造化されていませんでした。採用は保存のみ可能です。", "The organiser's answer was not in the expected structure. Only saving is possible."],
   ["【模擬】Gateway未接続の固定サンプルです。実AIによる会議ではありません。人間が採用ボタンを押すまで制作には移しません。", "[Simulated] A fixed sample, because no Gateway is connected. This is not a meeting held by real AIs. Nothing is built until a human adopts an option."],
+  ["【Ghost Foreman からの逆質問】人間に判断を仰ぐ前に、次の確認事項の選択肢を整理してください。", "[A follow-up question from Ghost Foreman] Before the human is asked, please set out the options for this question."],
+  ["確認事項: ", "Question: "],
+  ["作業は一旦止め、次のJSONだけを返してください（説明文は不要）:", "Pause the work and reply with this JSON only (no explanation):"],
+  ["逆質問を実施しましたが、整理可能な返答を得られませんでした（", "The Ghost asked the AI back, but got no answer it could summarise ("],
+  ["）。\n担当AIの返答: ", ").\nThe AI's answer: "],
   ["（返答なし: ", "(no answer: "],
   ["返答なし", "no answer"],
   ["時間内に返答がありませんでした", "No answer within the time limit"],
@@ -410,6 +438,11 @@ const STATUS = {
   human_resolved: [T("回答済み"), C.ok],
   batch_resolved: [T("まとめて回答済み"), C.ok],
 };
+// Who wrote each step of a question's history (the record stores a key).
+const PROBE_ROLE = {
+  ghost_judgement: T("幽霊の判定"), ghost_foreman_probe: T("幽霊からAIへの逆質問"), agent_clarification: T("AIの返答"),
+  human_inquiry: T("あなたの質問"), ghost_explanation: T("幽霊の説明"), agent_re_clarification: T("AIの再確認"),
+};
 const SLOT_STATUS = { working: T("作業中"), idle: T("待機中"), stopped: T("停止中"), waiting_human: T("あなたの判断待ち"), blocked: T("待機中（理由あり）") };
 const MEETING_STATUS = {
   running: [T("相談中…（数分かかります）"), C.accent],
@@ -458,7 +491,7 @@ function QuestionCard({ q, d, call, highlight }) {
       answer_text: answer,
       memory_mode: mode,
       policy_scope: "project",
-      policy_title: t("人間裁定: {x}", { x: String(q.raw_question).slice(0, 30) }),
+      policy_title: t("人間裁定: {x}", { x: String(q.raw_question).length > 60 ? String(q.raw_question).slice(0, 60) + "…" : String(q.raw_question) }),
       batch_apply_same_project: batch,
     });
   return h(
@@ -466,9 +499,9 @@ function QuestionCard({ q, d, call, highlight }) {
     { ref, style: { ...S.card, ...(highlight ? { borderColor: C.accent, boxShadow: `0 0 0 2px ${C.accent}55` } : {}) } },
     h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: projectName(d, q.project_id) }), h(Badge, { text: label, color })),
     h("h3", { style: { margin: "8px 0" } }, t("AIからの確認: {q}", { q: q.raw_question })),
-    q.context_summary ? h("p", { style: { whiteSpace: "pre-wrap" } }, q.context_summary) : null,
-    q.recommendation ? h("p", { style: { color: C.accent } }, t("👻 幽霊のおすすめ: {rec} — {why}", { rec: q.recommendation, why: q.recommendation_reason || "" })) : null,
-    ...(q.probe_history || []).map((p, i) => h("div", { key: "p" + i, style: S.log }, h("strong", null, `[${p.role}] `), p.text)),
+    q.context_summary ? h("p", { style: { whiteSpace: "pre-wrap" } }, tb(q.context_summary)) : null,
+    q.recommendation ? h("p", { style: { color: C.accent } }, t("👻 幽霊のおすすめ: {rec} — {why}", { rec: q.recommendation, why: tb(q.recommendation_reason || "") })) : null,
+    ...(q.probe_history || []).map((p, i) => h("div", { key: "p" + i, style: S.log }, h("strong", null, `[${tb(PROBE_ROLE[p.role] ? t(PROBE_ROLE[p.role]) : p.role)}] `), tb(p.text))),
     ...(q.options || []).map((o) =>
       h(
         "div",
@@ -486,7 +519,7 @@ function QuestionCard({ q, d, call, highlight }) {
           : null
       )
     ),
-    q.final_answer ? h("div", { style: { ...S.log, borderColor: C.ok } }, h("strong", null, t("[AIに送った回答] ")), q.final_answer) : null,
+    q.final_answer ? h("div", { style: { ...S.log, borderColor: C.ok } }, h("strong", null, t("[AIに送った回答] ")), tb(q.final_answer)) : null,
     isPending(q)
       ? h(
           "div",
@@ -526,13 +559,13 @@ function SlotCard({ d, s, call, technical }) {
     "div",
     { style: S.card },
     h("div", { style: { ...S.row, justifyContent: "space-between" } },
-      h("strong", null, technical ? `${s.id} ${s.name}` : s.name),
+      h("strong", null, technical ? `${s.id} ${tb(s.name)}` : tb(s.name)),
       h("span", { style: S.row },
         h(Badge, { text: s.is_live ? t("本物のAI（実接続）") : t("デモ用の見本（模擬）"), color: s.is_live ? C.ok : C.warn }),
         slotHalted(d, s) ? h(Badge, { text: t("停止中（人間の許可待ち）"), color: C.bad }) : null,
         h(Badge, { text: SLOT_STATUS[s.status] ? t(SLOT_STATUS[s.status]) : s.status }))),
-    h("div", null, t("{project} ／ 役割: {role}", { project: projectName(d, s.project_id), role: s.role }) + (technical ? " ／ " + s.backend : "")),
-    h("div", null, t("いまの仕事: {x}", { x: s.current_task })),
+    h("div", null, t("{project} ／ 役割: {role}", { project: projectName(d, s.project_id), role: tb(s.role) }) + (technical ? " ／ " + s.backend : "")),
+    h("div", null, t("いまの仕事: {x}", { x: tb(s.current_task) })),
     s.waiting_reason ? h("div", { style: { color: C.warn } }, t("待っている理由: {x}", { x: tb(s.waiting_reason) })) : null,
     s.next_task ? h("div", { style: S.mute }, t("次の予定: {x}", { x: s.next_task })) : null,
     h("div", { style: { ...S.row, marginTop: 8 } },
@@ -782,7 +815,7 @@ function Audit({ d }) {
     h("div", { style: { ...S.row, justifyContent: "space-between" } }, h(Badge, { text: `${a.project_id} / ${a.slot_id}` }), h(Badge, { text: `${a.actor}: ${a.action_type}` })),
     h("div", { style: { marginTop: 6 } }, t("原文: {x}", { x: a.raw_question })),
     a.referenced_policy_id ? h("div", { style: S.mute }, t("適用ルール: {x}", { x: a.referenced_policy_id })) : null,
-    h("div", { style: S.log }, a.answer_sent), h("div", { style: S.mute }, (a.rationale || "") + " / " + a.created_at))));
+    h("div", { style: S.log }, tb(a.answer_sent)), h("div", { style: S.mute }, tb(a.rationale || "") + " / " + a.created_at))));
 }
 
 // Only on Ghost Foreman's own phone page (ui/m/index.html sets window.__gfPush). Inside the Kiro Crew dashboard the
