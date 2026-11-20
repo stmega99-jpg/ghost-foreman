@@ -43,12 +43,20 @@ const clickText = async (label, nth = 0) => page.evaluate((l, n) => { const b = 
 
 await page.goto(origin + base + "/demo/index.html", { waitUntil: "domcontentloaded" });
 expect("opens in English in an English browser", await waitText("What would you like to do?"));
-expect("the sample projects show work from different fields", await (async () => { await clickText("Consult the AIs"); await waitText("Which project?"); const txt = await text(); await clickText("Back to home"); return ["Game production (sample)", "Product planning (sample)", "Article writing (sample)"].every((x) => txt.includes(x)); })());
+expect("the sample projects show work from different fields", await (async () => { await clickText("Consult the AIs"); await waitText("Which project?"); const txt = await text(); await clickText("Back to home"); return ["Action game (sample)", "Budgeting app (sample)", "Running a YouTube channel (sample)", "Opening an online shop (sample)", "Writing a romance novel (sample)"].every((x) => txt.includes(x)); })());
 expect("the banner says it is sample data, in English", (await text()).includes("Demo with sample data. No real AI, account or PC is connected"));
 await clickText("See how the AIs are doing"); await new Promise((r) => setTimeout(r, 500)); await dump("ais");
 expect("the screen says its AIs are samples, not real", await waitText("demo samples (not real AIs)"));
 await clickText("Back to home");
 
+// a project added on the Details screen appears in the consult screen's project list
+await clickText("Details & settings"); await waitText("Projects"); await clickText("Projects", 0); await waitText("Register the work you are doing as projects");
+await page.type("input[aria-label='New project name']", "My podcast");
+await clickText("+ Add the project");
+expect("a project can be added from the Details screen", await waitText("My podcast"));
+await clickText("Back to home"); await clickText("Consult the AIs"); await waitText("Which project?");
+expect("the new project can be picked when consulting", await page.evaluate(() => [...document.querySelectorAll("select[aria-label='Project'] option")].some((o) => o.textContent === "My podcast")));
+await clickText("Back to home");
 // language switch
 await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("lang") === "ja").click());
 expect("choosing 日本語 switches the page and the banner", await waitText("何をしますか？") && (await text()).includes("見本データのデモです") && (await page.evaluate(() => localStorage.getItem("gf-lang"))) === "ja");

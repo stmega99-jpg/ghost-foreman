@@ -262,6 +262,62 @@ class ForemanStore:
                 (key, json.dumps(value, ensure_ascii=False), _now_iso()),
             )
 
+    # ------------------------------------------------------------------ projects (the person's own work)
+    PROJECT_NAME_MAX = 80
+    PROJECT_DESCRIPTION_MAX = 300
+    PROJECT_STATUSES = ("active", "archived")
+
+    def _clean_project_text(self, name: Any, description: Any) -> tuple:
+        name = str(name if name is not None else "").strip()
+        description = str(description if description is not None else "").strip()
+        if not name:
+            raise ValueError("project name is required")
+        if len(name) > self.PROJECT_NAME_MAX:
+            raise ValueError(f"project name is longer than {self.PROJECT_NAME_MAX} characters")
+        if len(description) > self.PROJECT_DESCRIPTION_MAX:
+            raise ValueError(f"project description is longer than {self.PROJECT_DESCRIPTION_MAX} characters")
+        return name, description
+
+    def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return dict(row) if row else None
+
+    def create_project(self, name: Any, description: Any = "") -> Dict[str, Any]:
+        """Add a project the person works on. The id is generated; two active projects cannot share a name."""
+        name, description = self._clean_project_text(name, description)
+        with self._conn() as conn:
+            clash = conn.execute("SELECT id FROM projects WHERE name = ? AND status = 'active'", (name,)).fetchone()
+            if clash:
+                raise ValueError(f"an active project with this name already exists: {clash['id']}")
+            project_id = f"proj-{uuid.uuid4().hex[:8]}"
+            conn.execute(
+                "INSERT INTO projects (id, name, description, priority, status, budget_usd, spent_usd, created_at)"
+                " VALUES (?, ?, ?, 2, 'active', 0.0, 0.0, ?)",
+                (project_id, name, description, _now_iso()),
+            )
+        return self.get_project(project_id)  # type: ignore[return-value]
+
+    def update_project(self, project_id: str, name: Any = None, description: Any = None, status: Any = None) -> Dict[str, Any]:
+        """Rename, re-describe, archive or re-open a project. Nothing is deleted: its questions, rules and records stay."""
+        current = self.get_project(str(project_id or ""))
+        if current is None:
+            raise ValueError(f"unknown project: {project_id}")
+        new_name, new_description = self._clean_project_text(
+            current["name"] if name is None else name, current["description"] if description is None else description)
+        new_status = current["status"] if status is None else str(status)
+        if new_status not in self.PROJECT_STATUSES:
+            raise ValueError(f"project status must be one of {', '.join(self.PROJECT_STATUSES)}")
+        with self._conn() as conn:
+            if new_status == "active":
+                clash = conn.execute("SELECT id FROM projects WHERE name = ? AND status = 'active' AND id != ?",
+                                     (new_name, current["id"])).fetchone()
+                if clash:
+                    raise ValueError(f"an active project with this name already exists: {clash['id']}")
+            conn.execute("UPDATE projects SET name = ?, description = ?, status = ? WHERE id = ?",
+                         (new_name, new_description, new_status, current["id"]))
+        return self.get_project(current["id"])  # type: ignore[return-value]
+
     def seed_defaults_if_empty(self) -> None:
         with self._conn() as conn:
             count = conn.execute("SELECT COUNT(*) AS c FROM projects").fetchone()["c"]
