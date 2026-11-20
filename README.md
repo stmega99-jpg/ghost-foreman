@@ -20,7 +20,7 @@ Ghost Foreman is an installable **Kiro Crew app** (`app.json`) that sits between
 - **Selective memory (選択的記憶).** Your answer is either "this time only" or a permanent project rule. A rule is never created without your explicit choice.
 - **AI meetings (AI会議室).** Ask several *different* AIs (Kiro, Claude Code, Codex, Gemini) for ideas, let them critique each other, and get one summary with options. Nothing is built until you pick an option.
 - **Free-tier guard (無料API枠).** Cheap work goes to the Gemini free tier; if it runs out there is **no path to a paid API**.
-- **Emergency stop (緊急停止).** One button stops everything, including AIs started outside Kiro Crew. Only a human can resume.
+- **Emergency stop (緊急停止).** One button stops every AI that Ghost Foreman manages: its Kiro Crew slots and the AIs it started outside Kiro Crew for meetings (sessions you started yourself are not touched). Only a human can resume.
 - **Made for non-engineers.** The app starts from "what do you want to do?"; technical settings and run records are on a separate details screen. It also runs as its own iPhone Home Screen app.
 
 ---

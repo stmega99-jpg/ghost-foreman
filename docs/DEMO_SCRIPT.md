@@ -56,11 +56,14 @@
 
 ### 2:10–2:30 An emergency stop and the final say
 
+This is a **real stop of AIs that are really working**, recorded in one take. What it stops is exactly what **Ghost Foreman manages**: the Kiro Crew sessions it runs (its "slots") and the Claude Code / Codex programs it started for a meeting. Gemini gets no further request. AI sessions or apps you started yourself outside Ghost Foreman are not touched, and the subtitle says so.
+
 | Time | Picture | Subtitle |
 |---|---|---|
-| 2:10–2:18 | Tap **Stop all**, confirm. Every AI shows "stopped". | One button stops every AI, including the ones running outside Kiro Crew. |
-| 2:18–2:30 | The stop banner. Tap "Lift every stop": the AIs go to "Idle", not back to "Working". | Only you can lift the stop, and nothing restarts by itself. You always have the final say. |
-
+| 2:10–2:14 | Before: "How the AIs are doing" shows Ghost Foreman's AIs as **Working**, and a new meeting is in round 1 (Claude Code and Codex running). | Ghost Foreman's AIs are working, and a meeting is in progress. |
+| 2:14–2:20 | Tap **🛑 Stop all**, confirm. The AIs turn to **Stopped**; the meeting card says it was cancelled because of the emergency stop. | One button stops every AI that Ghost Foreman manages, right now. |
+| 2:20–2:25 | Details & settings → **Outside-AI run record**: the Claude Code / Codex runs of that meeting end as stopped by the emergency stop. *(Optional: Task Manager, cropped to the process list only, showing `claude` / `codex` gone.)* | Including Claude Code and Codex it started outside Kiro Crew. Your own apps are not touched. |
+| 2:25–2:30 | Tap "Lift every stop": the AIs go to **Idle**, not back to **Working**. | Only you can lift the stop, and nothing restarts by itself. You have the final say. |
 ### 2:30–2:50 Built with Kiro, try it yourself
 
 | Time | Picture | Subtitle |
@@ -82,6 +85,7 @@ Total 2:50. If it runs long, cut 0:48–0:55 first, then shorten 1:44–1:56.
 - [ ] **Phone.** Ghost Foreman Home Screen app, signed in. Hide the address bar, the tailnet name, the device name, other apps' notifications, your e-mail and account names. Blur anything that slips in.
 - [ ] **Meeting topic.** Something not private (the Gemini permission sends the meeting's text to a free tier).
 - [ ] **Kiro shot.** A Kiro IDE window with no personal paths, user names or e-mail visible.
+- [ ] **Stop shot (real AIs).** Right before 2:10, make sure at least one Ghost Foreman slot shows **Working**, then start a meeting with Claude Code and Codex and press Stop all **during round 1**, while they are running. Rehearse once: after the stop, the slots say Stopped, the meeting says it was cancelled, and the run record shows the runs ended by the emergency stop. If any of these does not show, fix the setup and record again rather than cutting around it. Lift the stop afterwards.
 - [ ] **Public demo shot.** https://stmega99-jpg.github.io/ghost-foreman/ with the "Demo with sample data" banner in frame.
 - [ ] Rehearse each scene once. Label every speed-up.
 

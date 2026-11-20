@@ -34,7 +34,7 @@ Code (MIT): https://github.com/stmega99-jpg/ghost-foreman · Demo with sample da
 
 **You get four opinions instead of one.** The meeting room asks four *different* AIs (Kiro, Claude Code, Codex and Gemini) the same question. They write their ideas on their own, critique each other, and a separate organiser sums up what they agreed on, where they differ and what's still open, with options for you. Any topic works: planning something, critiquing a draft, getting unstuck on a problem. Nothing happens until you pick an option.
 
-**You always have the final say.** One button stops every AI, including the ones started outside Kiro Crew. Only a person can lift the stop, and lifting it doesn't restart anything by itself.
+**You always have the final say.** One button stops every AI that Ghost Foreman manages: the Kiro Crew sessions it runs, and the Claude Code and Codex programs it started outside Kiro Crew for a meeting. (Apps and AI sessions you started yourself are not touched.) Only a person can lift the stop, and lifting it doesn't restart anything by itself.
 
 ## What works today (and what doesn't)
 
@@ -71,7 +71,6 @@ Some honest notes:
 - The steering file holds seven safety rules (for example "never switch to a paid API without permission" and "ask an AI back at most once per question"). They're also enforced in code and tests.
 - I did **not** use hooks, powers or Kiro's spec workflow. The `.kiro/specs` requirements, design and tasks were **reconstructed afterwards** from the pull-request history, and they say so.
 - Real testing found real bugs, and later pull requests fixed them: a Gemini retry that could continue after a stop, Japanese text left in English meeting minutes, README sentences that claimed more than the code did.
-- Before submitting I found my personal e-mail in the author field of four early commits. I re-created the repository with a cleaned history; the old pull-request descriptions are kept in `docs/PR_HISTORY.md`.
 
 ## Try it without any account
 

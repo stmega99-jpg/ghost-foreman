@@ -28,7 +28,7 @@ Ghost Foreman is a Kiro Crew app that takes over the supervising, so you only ma
 - **Remembers only what you choose.** Answers are one-time unless you say "make this our policy from now on". Rules stay in their project unless you make them global.
 - **Lets you decide away from the desk.** An iPhone Home Screen app, reached privately over Tailscale.
 - **Gets you four opinions.** A meeting of four different AIs (Kiro, Claude Code, Codex, Gemini): independent ideas, mutual critique, then one summary with options. Use it to plan, critique or get unstuck. Nothing happens until you choose.
-- **Keeps the final say with you.** One button stops every AI, including those started outside Kiro Crew. Only a person can lift the stop, and nothing restarts by itself.
+- **Keeps the final say with you.** One button stops every AI that Ghost Foreman manages: its Kiro Crew sessions and the Claude Code / Codex programs it started outside Kiro Crew for a meeting (apps and sessions you started yourself are not touched). Only a person can lift the stop, and nothing restarts by itself.
 - **Japanese and English** throughout, including meetings held in English.
 
 **Honest status.** Live on a real Kiro Crew Gateway: answering from rules, the follow-up question, one-time vs permanent rules, the four-AI meeting, the emergency stop, the phone app (tested in a real browser). **Not confirmed:** a push notification reaching a real iPhone. **Simulated:** PC control (state records only). **Not built:** voice control, scheduled news, detecting conflicts between AIs. The public demo uses sample data and is labelled so.
@@ -45,7 +45,6 @@ Ghost Foreman is a Kiro Crew app that takes over the supervising, so you only ma
 - Making a stop truly final: the hold is saved before any AI is interrupted, and the Gemini router checks for a stop before every request so a stopped meeting can't be retried on another model.
 - Gemini introduced itself as Claude in the first live meeting. The app now records which AI really answered from what it started, not from what it said.
 - Keeping the app honest: README sentences that claimed more than the code did were rewritten, and every screen labels live vs sample data.
-- Before submitting, my personal e-mail turned up in four early commits. I re-created the repository with a cleaned history and kept the old pull-request descriptions in `docs/PR_HISTORY.md`.
 
 ## Accomplishments that we're proud of
 
