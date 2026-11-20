@@ -31,5 +31,40 @@ class AgentOptions(unittest.TestCase):
         self.assertEqual(q["probe_count"], 0)
 
 
+class JudgeLanguage(unittest.TestCase):
+    """The judge's reason is shown to the person, so an English question gets an English prompt."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        store = ForemanStore(os.path.join(self.tmp.name, "gf.db"))
+        store.seed_defaults_if_empty()
+        self.sup = ForemanSupervisor(store, CrewAdapter(store))
+        self.prompts = []
+
+        class Res:
+            text = '{"policy_id": null, "confidence": 0.1, "reason": "x"}'
+            provider_id, model, switched_from = "fake", "fake", ""
+
+        def complete(task, prompt, system, **kw):
+            self.prompts.append(prompt)
+            return Res()
+
+        self.sup.llm.complete = complete
+
+    def judge(self, question):
+        self.sup._judge_policy("proj-shop", question, {"is_live": True})
+        return self.prompts[-1]
+
+    def test_an_english_question_gets_an_english_prompt(self):
+        p = self.judge("Should prices be shown with tax included?")
+        self.assertIn("Confirmed rules:", p)
+        self.assertIn("in English", p)
+        self.assertNotIn("確定ルール:", p)
+
+    def test_a_japanese_question_keeps_the_japanese_prompt(self):
+        p = self.judge("価格は税込みで表示しますか？")
+        self.assertIn("確定ルール:", p)
+
+
 if __name__ == "__main__":
     unittest.main()
