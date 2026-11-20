@@ -1,8 +1,8 @@
 # Pull request history (#1-#18)
 
-This repository was re-created on 2026-11-20. The pull-request pages of the earlier repository do not exist here. The history keeps their merge commits ("Merge pull request #N ..."), and the titles and descriptions below were saved from those pull requests, unchanged, so the order and the reasons of the work stay readable.
+This repository was re-created on 2026-11-20. The pull-request pages of the earlier repository do not exist here. The history keeps their merge commits ("Merge pull request #N ..."), and the titles and descriptions below were saved from those pull requests, so the order and the reasons of the work stay readable.
 
-What was changed when the repository was re-created: every author name is now "SW", and every author and committer e-mail address is the project's GitHub no-reply address (four early commits had a personal address). The GitHub web interface's own committer entry, "GitHub <noreply@github.com>", is left as it is. A local folder path in one early instruction file was replaced with a placeholder. The GitHub user name of the repository owner is unchanged. The files of the latest version are identical to the earlier repository (same tree). Nothing else in the history was changed.
+The history was cleaned when the repository was re-created: private information (personal details and the names of unrelated projects) was removed or replaced with made-up samples, every author name is "SW", and every e-mail address is a GitHub no-reply address. The code is otherwise unchanged. Where a pull-request description below mentioned removed information, that part was replaced in the same way.
 
 | # | Merged (UTC) | Branch | Changed files | + / - | Title |
 |---|---|---|---|---|---|
